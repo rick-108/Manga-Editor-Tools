@@ -1,0 +1,217 @@
+import { useParams, Link } from "wouter";
+import { useGetManga, useListChapters, useGetMangaComments, useAddMangaComment } from "@workspace/api-client-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { format } from "date-fns";
+import { useAuth } from "@/hooks/use-auth";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getGetMangaCommentsQueryKey } from "@workspace/api-client-react";
+import { Badge } from "@/components/ui/badge";
+
+export default function MangaDetail() {
+  const params = useParams<{ id: string }>();
+  const id = Number(params.id);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const { data: manga, isLoading: mangaLoading } = useGetManga(id);
+  const { data: chapters, isLoading: chaptersLoading } = useListChapters(id);
+  const { data: comments, isLoading: commentsLoading } = useGetMangaComments(id);
+  
+  const addComment = useAddMangaComment();
+  const [commentContent, setCommentContent] = useState("");
+
+  const handleAddComment = () => {
+    if (!commentContent.trim() || !user) return;
+    
+    addComment.mutate({
+      mangaId: id,
+      data: { content: commentContent }
+    }, {
+      onSuccess: () => {
+        setCommentContent("");
+        queryClient.invalidateQueries({ queryKey: getGetMangaCommentsQueryKey(id) });
+      }
+    });
+  };
+
+  if (mangaLoading) {
+    return (
+      <div className="container py-8 max-w-6xl mx-auto px-4">
+        <div className="flex flex-col md:flex-row gap-8">
+          <Skeleton className="w-full md:w-[300px] aspect-[2/3] rounded-xl flex-shrink-0" />
+          <div className="flex-1 space-y-4 mt-4 md:mt-0">
+            <Skeleton className="h-10 w-3/4" />
+            <Skeleton className="h-6 w-1/4" />
+            <Skeleton className="h-32 w-full mt-6" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!manga) return <div className="text-center py-24">العمل غير موجود</div>;
+
+  return (
+    <div className="w-full pb-24">
+      {/* Backdrop */}
+      <div className="relative w-full h-[40vh] min-h-[300px] overflow-hidden">
+        <div className="absolute inset-0 z-0 bg-gradient-to-t from-background via-background/80 to-background/30" />
+        <div 
+          className="absolute inset-0 -z-10 bg-cover bg-center bg-no-repeat opacity-30 blur-xl scale-110"
+          style={{ backgroundImage: `url(${manga.coverImage || ''})` }}
+        />
+      </div>
+
+      <div className="container max-w-6xl mx-auto px-4 -mt-[20vh] relative z-10">
+        <div className="flex flex-col md:flex-row gap-8">
+          {/* Cover */}
+          <div className="w-48 md:w-[300px] flex-shrink-0 mx-auto md:mx-0 shadow-2xl rounded-xl overflow-hidden border border-border/50 bg-secondary">
+            <img 
+              src={manga.coverImage || "https://placehold.co/400x600/1a1a1a/666?text=No+Cover"} 
+              alt={manga.title}
+              className="w-full h-auto object-cover aspect-[2/3]"
+            />
+          </div>
+
+          {/* Info */}
+          <div className="flex-1 flex flex-col pt-4 md:pt-16">
+            <div className="flex flex-wrap gap-2 mb-3">
+              <Badge variant="secondary" className="bg-primary/20 text-primary hover:bg-primary/30">
+                {manga.type === 'manhwa' ? 'مانهوا' : manga.type === 'manhua' ? 'مانهوا صينية' : 'مانغا'}
+              </Badge>
+              <Badge variant="outline">
+                {manga.status === 'ongoing' ? 'مستمر' : manga.status === 'completed' ? 'مكتمل' : 'متوقف'}
+              </Badge>
+            </div>
+            
+            <h1 className="text-3xl md:text-5xl font-bold tracking-tight mb-6">{manga.title}</h1>
+            
+            <div className="prose prose-invert max-w-none text-muted-foreground leading-relaxed mb-8">
+              {manga.description || "لا يوجد وصف."}
+            </div>
+
+            {manga.genres && manga.genres.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-8">
+                {manga.genres.map(g => (
+                  <span key={g} className="text-xs font-medium bg-secondary text-secondary-foreground px-3 py-1 rounded-full">
+                    {g}
+                  </span>
+                ))}
+              </div>
+            )}
+            
+            {chapters && chapters.length > 0 && (
+              <Link href={`/manga/${manga.id}/chapter/${chapters[0].id}`}>
+                <Button size="lg" className="w-full md:w-auto self-start px-8 rounded-full h-14 text-lg shadow-[0_0_20px_rgba(225,29,72,0.3)]">
+                  قراءة الفصل الأول
+                </Button>
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* Chapters Section */}
+        <div className="mt-16 md:mt-24 grid grid-cols-1 lg:grid-cols-3 gap-12">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="flex items-center justify-between border-b border-border/50 pb-4">
+              <h2 className="text-2xl font-bold">الفصول</h2>
+              <span className="text-muted-foreground">{chapters?.length || 0} فصول</span>
+            </div>
+            
+            {chaptersLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
+              </div>
+            ) : chapters?.length === 0 ? (
+              <div className="py-12 text-center text-muted-foreground bg-secondary/20 rounded-xl border border-border/50">
+                لا توجد فصول بعد.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {chapters?.map((chapter) => (
+                  <Link key={chapter.id} href={`/manga/${manga.id}/chapter/${chapter.id}`}>
+                    <div className="group flex items-center justify-between p-4 rounded-xl bg-secondary/30 hover:bg-secondary border border-border/50 hover:border-primary/50 transition-all cursor-pointer">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-bold text-lg group-hover:text-primary transition-colors">
+                          الفصل {chapter.number} {chapter.title && `- ${chapter.title}`}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {chapter.createdAt ? format(new Date(chapter.createdAt), "yyyy/MM/dd") : ""}
+                        </span>
+                      </div>
+                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        قراءة
+                      </Button>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Comments Section */}
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold border-b border-border/50 pb-4">التعليقات</h2>
+            
+            {user ? (
+              <div className="space-y-3 bg-secondary/20 p-4 rounded-xl border border-border/50">
+                <Textarea 
+                  placeholder="أضف تعليقاً..." 
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  className="bg-background resize-none h-24"
+                />
+                <Button 
+                  onClick={handleAddComment} 
+                  disabled={!commentContent.trim() || addComment.isPending}
+                  className="w-full"
+                >
+                  إرسال التعليق
+                </Button>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl border border-border/50 bg-secondary/20 text-center">
+                <p className="text-sm text-muted-foreground mb-4">يجب تسجيل الدخول لإضافة تعليق.</p>
+                <Link href="/login">
+                  <Button variant="outline" size="sm">تسجيل الدخول</Button>
+                </Link>
+              </div>
+            )}
+
+            <div className="space-y-4 mt-6">
+              {commentsLoading ? (
+                <Skeleton className="h-24 w-full rounded-lg" />
+              ) : comments?.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">لا توجد تعليقات بعد.</p>
+              ) : (
+                comments?.map((comment) => (
+                  <div key={comment.id} className="p-4 rounded-xl bg-secondary/30 border border-border/50 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0 overflow-hidden">
+                        {comment.user?.avatar ? (
+                          <img src={comment.user.avatar} alt={comment.user.username} className="w-full h-full object-cover" />
+                        ) : (
+                          comment.user?.username.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">{comment.user?.username}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {format(new Date(comment.createdAt), "yyyy/MM/dd HH:mm")}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-sm text-foreground/90 pl-10 pr-2">{comment.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,781 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: RTN Manga API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+  - name: manga
+  - name: chapters
+  - name: pages
+  - name: publisher
+  - name: remote
+  - name: auth
+  - name: comments
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /manga:
+    get:
+      operationId: listManga
+      tags: [manga]
+      summary: List all manga
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: genre
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer }
+        - name: limit
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: List of manga
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MangaListResponse"
+    post:
+      operationId: createManga
+      tags: [manga]
+      summary: Create new manga (publisher only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MangaInput"
+      responses:
+        "201":
+          description: Created manga
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Manga"
+
+  /manga/stats:
+    get:
+      operationId: getMangaStats
+      tags: [manga]
+      summary: Get site statistics
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteStats"
+
+  /manga/latest-updates:
+    get:
+      operationId: getLatestUpdates
+      tags: [manga]
+      summary: Recently updated manga
+      responses:
+        "200":
+          description: Latest updates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MangaWithLatestChapter"
+
+  /manga/{id}:
+    get:
+      operationId: getManga
+      tags: [manga]
+      summary: Get manga by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Manga
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Manga"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateManga
+      tags: [manga]
+      summary: Update manga (publisher only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MangaUpdate"
+      responses:
+        "200":
+          description: Updated manga
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Manga"
+    delete:
+      operationId: deleteManga
+      tags: [manga]
+      summary: Delete manga (publisher only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+  /manga/{mangaId}/chapters:
+    get:
+      operationId: listChapters
+      tags: [chapters]
+      summary: List chapters for a manga
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Chapters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Chapter"
+    post:
+      operationId: createChapter
+      tags: [chapters]
+      summary: Create chapter (publisher only)
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChapterInput"
+      responses:
+        "201":
+          description: Created chapter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+
+  /manga/{mangaId}/chapters/{chapterId}:
+    get:
+      operationId: getChapter
+      tags: [chapters]
+      summary: Get chapter with pages
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Chapter with pages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChapterWithPages"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteChapter
+      tags: [chapters]
+      summary: Delete a chapter (publisher only)
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+  /manga/{mangaId}/chapters/{chapterId}/publish:
+    post:
+      operationId: publishChapter
+      tags: [chapters]
+      summary: Publish a pending chapter
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Published chapter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chapter"
+
+  /manga/{mangaId}/chapters/{chapterId}/pages:
+    get:
+      operationId: listPages
+      tags: [pages]
+      summary: Get pages for a chapter
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Pages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Page"
+
+  /manga/{mangaId}/chapters/{chapterId}/pages/reorder:
+    post:
+      operationId: reorderPages
+      tags: [pages]
+      summary: Reorder pages
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PageReorderInput"
+      responses:
+        "200":
+          description: Reordered pages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Page"
+
+  /manga/{mangaId}/chapters/{chapterId}/pages/{pageId}:
+    delete:
+      operationId: deletePage
+      tags: [pages]
+      summary: Delete a single page
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: chapterId
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: pageId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+  /publisher/auth:
+    post:
+      operationId: publisherAuth
+      tags: [publisher]
+      summary: Authenticate as publisher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublisherAuthInput"
+      responses:
+        "200":
+          description: Auth result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublisherAuthResult"
+
+  /publisher/pending-chapters:
+    get:
+      operationId: listPendingChapters
+      tags: [publisher]
+      summary: List all pending chapters
+      responses:
+        "200":
+          description: Pending chapters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChapterWithManga"
+
+  /remote/import:
+    post:
+      operationId: remoteImport
+      tags: [remote]
+      summary: Import pages from remote URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoteImportInput"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteImportResult"
+
+  /remote/preview:
+    post:
+      operationId: remotePreview
+      tags: [remote]
+      summary: Preview pages from remote URL before import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemotePreviewInput"
+      responses:
+        "200":
+          description: Preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemotePreviewResult"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserRegisterInput"
+      responses:
+        "201":
+          description: Registered user with token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResult"
+        "400":
+          description: Validation error or username taken
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserLoginInput"
+      responses:
+        "200":
+          description: Login result with token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResult"
+        "401":
+          description: Invalid credentials
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current logged in user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /comments/manga/{mangaId}:
+    get:
+      operationId: getMangaComments
+      tags: [comments]
+      summary: Get comments for a manga
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+    post:
+      operationId: addMangaComment
+      tags: [comments]
+      summary: Add a comment to a manga
+      parameters:
+        - name: mangaId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommentInput"
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /comments/{commentId}:
+    delete:
+      operationId: deleteComment
+      tags: [comments]
+      summary: Delete a comment (author only)
+      parameters:
+        - name: commentId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Deleted
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status: { type: string }
+      required: [status]
+
+    Manga:
+      type: object
+      required: [id, title, type, status, createdAt]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: ["string", "null"] }
+        coverImage: { type: ["string", "null"] }
+        type: { type: string }
+        status: { type: string }
+        genres: { type: array, items: { type: string } }
+        chapterCount: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+
+    MangaInput:
+      type: object
+      required: [title, type, status]
+      properties:
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        coverImage: { type: string }
+        type: { type: string }
+        status: { type: string }
+        genres: { type: array, items: { type: string } }
+
+    MangaUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        coverImage: { type: string }
+        type: { type: string }
+        status: { type: string }
+        genres: { type: array, items: { type: string } }
+
+    MangaListResponse:
+      type: object
+      required: [data, total, page, limit]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Manga"
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    MangaWithLatestChapter:
+      type: object
+      required: [id, title, type]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        coverImage: { type: ["string", "null"] }
+        type: { type: string }
+        status: { type: string }
+        latestChapterNumber: { type: ["number", "null"] }
+        latestChapterTitle: { type: ["string", "null"] }
+        latestChapterId: { type: ["integer", "null"] }
+        updatedAt: { type: string }
+
+    Chapter:
+      type: object
+      required: [id, mangaId, number, status, createdAt]
+      properties:
+        id: { type: integer }
+        mangaId: { type: integer }
+        number: { type: number }
+        title: { type: ["string", "null"] }
+        status: { type: string }
+        pageCount: { type: integer }
+        createdAt: { type: string }
+        publishedAt: { type: ["string", "null"] }
+
+    ChapterInput:
+      type: object
+      required: [number]
+      properties:
+        number: { type: number }
+        title: { type: string }
+
+    ChapterWithPages:
+      type: object
+      required: [id, mangaId, number, status, pages]
+      properties:
+        id: { type: integer }
+        mangaId: { type: integer }
+        number: { type: number }
+        title: { type: ["string", "null"] }
+        status: { type: string }
+        createdAt: { type: string }
+        publishedAt: { type: ["string", "null"] }
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Page"
+        manga:
+          $ref: "#/components/schemas/Manga"
+
+    ChapterWithManga:
+      type: object
+      required: [id, mangaId, number, status, createdAt]
+      properties:
+        id: { type: integer }
+        mangaId: { type: integer }
+        number: { type: number }
+        title: { type: ["string", "null"] }
+        status: { type: string }
+        pageCount: { type: integer }
+        createdAt: { type: string }
+        manga:
+          $ref: "#/components/schemas/Manga"
+
+    Page:
+      type: object
+      required: [id, chapterId, pageNumber, imageUrl]
+      properties:
+        id: { type: integer }
+        chapterId: { type: integer }
+        pageNumber: { type: integer }
+        imageUrl: { type: string }
+        createdAt: { type: string }
+
+    PageReorderInput:
+      type: object
+      required: [pageIds]
+      properties:
+        pageIds:
+          type: array
+          items: { type: integer }
+
+    PublisherAuthInput:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+
+    PublisherAuthResult:
+      type: object
+      required: [success, token]
+      properties:
+        success: { type: boolean }
+        token: { type: string }
+        message: { type: ["string", "null"] }
+
+    SiteStats:
+      type: object
+      required: [totalManga, totalChapters, totalPages]
+      properties:
+        totalManga: { type: integer }
+        totalChapters: { type: integer }
+        totalPages: { type: integer }
+        publishedChapters: { type: integer }
+        pendingChapters: { type: integer }
+
+    RemoteImportInput:
+      type: object
+      required: [url, mangaId, chapterId]
+      properties:
+        url: { type: string }
+        mangaId: { type: integer }
+        chapterId: { type: integer }
+
+    RemoteImportResult:
+      type: object
+      required: [success, importedPages]
+      properties:
+        success: { type: boolean }
+        importedPages: { type: integer }
+        message: { type: ["string", "null"] }
+        errors: { type: array, items: { type: string } }
+
+    RemotePreviewInput:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string }
+
+    RemotePreviewResult:
+      type: object
+      required: [title, pageCount, pageUrls]
+      properties:
+        title: { type: string }
+        pageCount: { type: integer }
+        pageUrls:
+          type: array
+          items: { type: string }
+        chapterNumber: { type: ["number", "null"] }
+        mangaTitle: { type: ["string", "null"] }
+
+    UserRegisterInput:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3 }
+        email: { type: string }
+        password: { type: string, minLength: 6 }
+        avatar: { type: string }
+
+    UserLoginInput:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+
+    User:
+      type: object
+      required: [id, username, createdAt]
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        email: { type: ["string", "null"] }
+        avatar: { type: ["string", "null"] }
+        createdAt: { type: string }
+
+    AuthResult:
+      type: object
+      required: [success, token, user]
+      properties:
+        success: { type: boolean }
+        token: { type: string }
+        message: { type: ["string", "null"] }
+        user:
+          $ref: "#/components/schemas/User"
+
+    Comment:
+      type: object
+      required: [id, mangaId, userId, content, createdAt]
+      properties:
+        id: { type: integer }
+        mangaId: { type: integer }
+        userId: { type: integer }
+        content: { type: string }
+        createdAt: { type: string }
+        user:
+          $ref: "#/components/schemas/User"
+
+    CommentInput:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1 }

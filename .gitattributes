@@ -1,0 +1,2 @@
+rtn-manga.tar.gz filter=lfs diff=lfs merge=lfs -text
+my_website.zip filter=lfs diff=lfs merge=lfs -text
