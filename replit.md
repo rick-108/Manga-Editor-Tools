@@ -2,6 +2,13 @@
 
 منصة قراءة مانغا/مانهوا عربية، تدعم رفع الفصول يدوياً أو استيرادها من روابط بعيدة، مع نظام تعليقات ومصادقة للمستخدمين.
 
+## First-time setup
+
+1. `pnpm install` — install all workspace dependencies
+2. `pnpm --filter @workspace/db run push` — create database tables (requires `DATABASE_URL`)
+
+Both steps have been completed in the current Replit environment.
+
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
