@@ -2,79 +2,98 @@
 
 منصة قراءة مانغا/مانهوا عربية، تدعم رفع الفصول يدوياً أو استيرادها من روابط بعيدة، مع نظام تعليقات ومصادقة للمستخدمين.
 
-## First-time setup
+---
 
-1. `pnpm install` — install all workspace dependencies
-2. `pnpm --filter @workspace/db run push` — create database tables (requires `DATABASE_URL`)
+## ⚠️ تعليمات إلزامية لأي Agent/AI يعمل على هذا المشروع
 
-Both steps have been completed in the current Replit environment.
+> **اقرأ هذا القسم أولاً قبل أي شيء آخر.**
+
+### قاعدة البيانات — لا تُنشئ قاعدة جديدة أبداً
+
+- هذا المشروع **متصل بقاعدة بيانات Neon سحابية موجودة ومليئة بالبيانات**.
+- المفتاح المطلوب: `NEON_DATABASE_URL` — يجب أن يكون موجوداً في Replit Secrets.
+- **إذا لم تجد `NEON_DATABASE_URL` في Secrets: اطلب من المستخدم إضافته فوراً. لا تُنشئ قاعدة بيانات جديدة ولا تشغّل `drizzle-kit push` قبل الحصول عليه.**
+- لا تستخدم قاعدة Replit المدمجة (`DATABASE_URL`) — الكود يفضّل `NEON_DATABASE_URL` تلقائياً.
+- أمر `drizzle-kit push` يُشغَّل **فقط** إذا طلب المستخدم صراحةً إضافة جدول جديد، وبعد موافقته على ذلك.
+
+### الصور — يجب استخدام ImgBB
+
+- الصور (أغلفة المانغا وصفحات الفصول) تُرفع على **ImgBB** لتكون دائمة.
+- المفتاح المطلوب: `IMGBB_API_KEY` — يجب أن يكون موجوداً في Replit Secrets.
+- **إذا لم تجد `IMGBB_API_KEY`: اطلب من المستخدم إضافته. الصور بدونه تُحفظ محلياً وستضيع.**
+- احصل على المفتاح من: https://api.imgbb.com
+
+### المفاتيح المطلوبة لتشغيل المشروع
+
+| المفتاح | نوعه | الوصف |
+|---------|------|-------|
+| `NEON_DATABASE_URL` | Secret (إلزامي) | رابط Neon السحابي — لا تُنشئ بديلاً |
+| `SESSION_SECRET` | Secret (إلزامي) | نص عشوائي لتشفير جلسات المستخدمين |
+| `IMGBB_API_KEY` | Secret (إلزامي عملياً) | مفتاح رفع الصور الدائم |
+| `PUBLISHER_CODE` | Secret (اختياري) | كلمة مرور لوحة الناشر |
+| `PUBLISHER_TOKEN` | Secret (اختياري) | رمز Bearer للناشر |
+
+---
+
+## First-time setup (حساب جديد)
+
+1. أضف جميع المفاتيح أعلاه في **Replit Secrets** أولاً
+2. `pnpm install` — تثبيت المكتبات
+3. **لا تشغّل `drizzle-kit push`** — الجداول موجودة في Neon مسبقاً
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
-- `pnpm --filter @workspace/rtn-manga run dev` — run the frontend (port 21301)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
-- Required env: `SESSION_SECRET` — used as JWT secret for user auth
-- Optional env: `PUBLISHER_CODE` — publisher password (default: rtn_publisher_2024)
-- Optional env: `PUBLISHER_TOKEN` — publisher bearer token (default: rtn_publisher_secret_token)
-- Optional env: `IMGBB_API_KEY` — if set, all images are stored on ImgBB (free, unlimited) instead of local disk
+- `pnpm --filter @workspace/api-server run dev` — تشغيل API (port 8080)
+- `pnpm --filter @workspace/rtn-manga run dev` — تشغيل الواجهة (port 21301)
+- `pnpm run typecheck` — فحص TypeScript
+- `pnpm run build` — بناء المشروع كاملاً
+- `pnpm --filter @workspace/api-spec run codegen` — إعادة توليد API hooks من OpenAPI
+- `pnpm --filter @workspace/db run push` — ⚠️ لإضافة جداول جديدة فقط (بموافقة صريحة)
+
+---
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- pnpm workspaces, Node.js 20, TypeScript 5.9
 - Frontend: React + Vite + Tailwind + shadcn/ui + Wouter routing
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- DB: PostgreSQL (Neon) + Drizzle ORM
 - Auth: bcryptjs + JWT (users), bearer token (publisher)
-- File uploads: multer (pages + cover image)
-- Remote import: axios + cheerio (scraping)
-- Validation: Zod (zod/v4), drizzle-zod
-- API codegen: Orval (from OpenAPI spec)
+- File uploads: multer → ImgBB (دائم) أو local disk (مؤقت كـ fallback)
+- Remote import: axios + cheerio
+- Validation: Zod, drizzle-zod
 - Build: esbuild (CJS bundle)
 
-## Where things live
-
-- `lib/api-spec/openapi.yaml` — API contract (source of truth)
-- `lib/db/src/schema/` — Drizzle schema (manga, chapters, pages, users, comments)
-- `artifacts/api-server/src/routes/` — Express route handlers
-- `artifacts/rtn-manga/src/pages/` — React pages
-- `artifacts/rtn-manga/src/hooks/use-auth.tsx` — Auth context (user + publisher tokens)
-- `artifacts/api-server/uploads/` — Uploaded images (served at /api/uploads/)
+---
 
 ## Architecture decisions
 
-- Publisher auth uses a simple shared code (PUBLISHER_CODE env) returning a bearer token — no per-user accounts for publishers
-- User auth uses JWT signed with SESSION_SECRET, stored in localStorage
-- Upload field name for pages MUST be "pages" (multer.array("pages")) — frontend sends FormData with this field name
-- Remote import downloads images locally to /uploads/ so they're served reliably
-- Arabic titles and author/artist fields were removed from manga schema by design
-- RTL layout enforced on html element via direction:rtl in index.css
+- **قاعدة البيانات الوحيدة هي Neon** — كل المانغا والفصول والصفحات والمستخدمين والتعليقات تُحفظ فيها
+- الكود في `lib/db/src/index.ts` يستخدم `NEON_DATABASE_URL` أولاً ثم `DATABASE_URL` كـ fallback
+- صور الغلاف وصفحات الفصول تذهب لـ ImgBB إذا كان `IMGBB_API_KEY` موجوداً — وإلا تُحفظ محلياً (مؤقت)
+- Publisher auth: كود مشترك بسيط (`PUBLISHER_CODE`) يُرجع Bearer token
+- User auth: JWT مُوقَّع بـ `SESSION_SECRET` مخزَّن في localStorage
+- RTL layout مُفعَّل على عنصر html عبر `direction:rtl` في index.css
 
-## Product
+## Where things live
 
-- Home page with hero, stats, latest updates grid
-- Manga catalog with search/filter by type/status/genre
-- Manga detail page with chapter list and comment section
-- Full-screen vertical manga reader with keyboard navigation
-- Publisher dashboard (password protected): create manga, add/upload chapters, manage pending chapters, remote import
-- User registration/login/profile pages
-
-## User preferences
-
-_Populate as you build._
+- `lib/api-spec/openapi.yaml` — عقد الـ API (source of truth)
+- `lib/db/src/schema/` — Drizzle schema (manga, chapters, pages, users, comments)
+- `lib/db/src/index.ts` — اتصال قاعدة البيانات
+- `artifacts/api-server/src/routes/` — Express route handlers
+- `artifacts/api-server/src/lib/storage.ts` — منطق رفع الصور (ImgBB أو local)
+- `artifacts/rtn-manga/src/pages/` — React pages
+- `artifacts/rtn-manga/src/hooks/use-auth.tsx` — Auth context
 
 ## Gotchas
 
-- Upload field name for pages is "pages" (multer.array("pages", 500)) — critical to match
-- Cover upload field name is "cover" (multer.single("cover"))
-- PUBLISHER_CODE env var controls publisher access — never shown in UI
-- Remote import scrapes any URL using cheerio with multiple CSS selector fallbacks
-- Publisher token must be sent as Authorization: Bearer {token} header
+- Upload field name for pages: `"pages"` (multer.array("pages", 500))
+- Cover upload field name: `"cover"` (multer.single("cover"))
+- `NEON_DATABASE_URL` يُقدَّم على `DATABASE_URL` — لا تحذفه
+- Remote import يسحب الصور من أي رابط عبر cheerio
 
-## Pointers
+## User preferences
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- اللغة العربية في التواصل مع المستخدم
+- قاعدة البيانات: Neon فقط — لا بديل
+- الصور: ImgBB فقط — لا تخزين محلي دائم
