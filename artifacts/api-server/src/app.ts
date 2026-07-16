@@ -5,6 +5,14 @@ import path from "path";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
+// ─── Startup checks ───────────────────────────────────────────────────────────
+if (!process.env.IMGBB_API_KEY?.trim()) {
+  logger.error("IMGBB_API_KEY is not set — image uploads will be rejected. Add it to Replit Secrets.");
+}
+if (!process.env.NEON_DATABASE_URL?.trim()) {
+  logger.warn("NEON_DATABASE_URL is not set — falling back to DATABASE_URL. Add NEON_DATABASE_URL to Replit Secrets.");
+}
+
 const app: Express = express();
 
 app.use(
