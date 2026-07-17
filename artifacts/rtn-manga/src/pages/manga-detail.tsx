@@ -9,7 +9,27 @@ import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetMangaCommentsQueryKey } from "@workspace/api-client-react";
 import { Badge } from "@/components/ui/badge";
-import { BookMarked, BookmarkMinus, Check } from "lucide-react";
+import { BookMarked, Check, CheckCircle2 } from "lucide-react";
+
+function useReadChapters(mangaId: number) {
+  const [readSet, setReadSet] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(`read_${mangaId}`) || "[]") as number[];
+      setReadSet(new Set(stored));
+    } catch {}
+    // Listen for storage changes (cross-tab or from reader page)
+    const onStorage = () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(`read_${mangaId}`) || "[]") as number[];
+        setReadSet(new Set(stored));
+      } catch {}
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [mangaId]);
+  return readSet;
+}
 
 export default function MangaDetail() {
   const params = useParams<{ id: string }>();
@@ -20,6 +40,7 @@ export default function MangaDetail() {
   const { data: manga, isLoading: mangaLoading } = useGetManga(id);
   const { data: chapters, isLoading: chaptersLoading } = useListChapters(id);
   const { data: comments, isLoading: commentsLoading } = useGetMangaComments(id);
+  const readChapters = useReadChapters(id);
 
   const addComment = useAddMangaComment();
   const [commentContent, setCommentContent] = useState("");
@@ -174,22 +195,41 @@ export default function MangaDetail() {
             ) : chapters?.length === 0 ? (
               <div className="py-12 text-center text-muted-foreground bg-secondary/20 rounded-xl border border-border/50">لا توجد فصول بعد.</div>
             ) : (
-              <div className="grid gap-3">
-                {chapters?.map((chapter) => (
-                  <Link key={chapter.id} href={`/manga/${manga.id}/chapter/${chapter.id}`}>
-                    <div className="group flex items-center justify-between p-4 rounded-xl bg-secondary/30 hover:bg-secondary border border-border/50 hover:border-primary/50 transition-all cursor-pointer">
-                      <div className="flex flex-col gap-1">
-                        <span className="font-bold text-lg group-hover:text-primary transition-colors">
-                          الفصل {chapter.number} {chapter.title && `- ${chapter.title}`}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {chapter.createdAt ? format(new Date(chapter.createdAt), "yyyy/MM/dd") : ""}
+              <div className="grid gap-2.5">
+                {chapters?.map((chapter) => {
+                  const isRead = readChapters.has(chapter.id);
+                  return (
+                    <Link key={chapter.id} href={`/manga/${manga.id}/chapter/${chapter.id}`}>
+                      <div className={`group flex items-center justify-between p-4 rounded-xl border transition-all cursor-pointer ${
+                        isRead
+                          ? "bg-secondary/10 border-border/30 opacity-60 hover:opacity-100 hover:bg-secondary/40 hover:border-border/60"
+                          : "bg-secondary/30 hover:bg-secondary border-border/50 hover:border-primary/50"
+                      }`}>
+                        <div className="flex items-center gap-3">
+                          {isRead && (
+                            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                          )}
+                          <div className="flex flex-col gap-0.5">
+                            <span className={`font-bold text-base transition-colors ${isRead ? "line-through decoration-muted-foreground/40" : "group-hover:text-primary"}`}>
+                              الفصل {chapter.number}{chapter.title ? ` - ${chapter.title}` : ""}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {chapter.createdAt ? format(new Date(chapter.createdAt), "yyyy/MM/dd") : ""}
+                              {isRead && <span className="mr-2 text-primary/80 font-medium">• تمت القراءة</span>}
+                            </span>
+                          </div>
+                        </div>
+                        <span className={`text-xs font-medium px-3 py-1 rounded-full transition-all ${
+                          isRead
+                            ? "bg-primary/10 text-primary"
+                            : "bg-transparent text-muted-foreground opacity-0 group-hover:opacity-100"
+                        }`}>
+                          {isRead ? "إعادة قراءة" : "قراءة"}
                         </span>
                       </div>
-                      <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity">قراءة</Button>
-                    </div>
-                  </Link>
-                ))}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

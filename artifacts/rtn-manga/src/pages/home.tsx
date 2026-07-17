@@ -1,6 +1,5 @@
-import { useGetLatestUpdates, useGetMangaStats } from "@workspace/api-client-react";
+import { useGetLatestUpdates } from "@workspace/api-client-react";
 import { Link } from "wouter";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect, useState, useRef } from "react";
@@ -214,58 +213,17 @@ function FeaturedSection() {
 }
 
 export default function Home() {
-  const { data: stats, isLoading: statsLoading } = useGetMangaStats();
   const { data: updates, isLoading: updatesLoading } = useGetLatestUpdates();
 
   return (
     <div className="flex-1 w-full pb-12">
-      {/* Hero */}
-      <section className="relative w-full h-[50vh] min-h-[360px] flex items-center justify-center overflow-hidden border-b border-border/50">
-        <div className="absolute inset-0 z-0 bg-gradient-to-t from-background via-background/75 to-background/20" />
-        <div className="absolute inset-0 -z-10 bg-[url('https://images.unsplash.com/photo-1612036782180-6f0b6cd846fe?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 blur-sm" />
-        <div className="container relative z-10 px-4 md:px-6 flex flex-col items-center text-center gap-5">
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tighter text-foreground drop-shadow-md">
-            اكتشف عوالم <span className="text-primary">جديدة</span>
-          </h1>
-          <p className="text-lg text-muted-foreground max-w-[560px]">
-            منصة القراءة الرائدة للقصص المصورة والمانهوا العربية.
-          </p>
-          <Link href="/manga">
-            <Button size="lg" className="px-8 rounded-full h-12 text-md mt-2">تصفح المكتبة</Button>
-          </Link>
-        </div>
-      </section>
-
-      {/* 🔥 Trending — TOP of list */}
-      <section className="py-12 container px-4 md:px-6">
-        <div className="flex items-center gap-3 mb-7">
+      {/* 🔥 Trending */}
+      <section className="py-8 container px-4 md:px-6">
+        <div className="flex items-center gap-3 mb-5">
           <Flame className="h-7 w-7 text-primary" />
-          <h2 className="text-3xl font-bold tracking-tight">الأكثر رائجاً</h2>
+          <h2 className="text-2xl font-bold tracking-tight">الأكثر رائجاً</h2>
         </div>
         <TrendingCarousel />
-      </section>
-
-      {/* Stats */}
-      <section className="py-8 bg-secondary/20">
-        <div className="container px-4 md:px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-            {statsLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="flex flex-col items-center gap-2">
-                  <Skeleton className="h-10 w-20" />
-                  <Skeleton className="h-4 w-16" />
-                </div>
-              ))
-            ) : (
-              <>
-                <div className="flex flex-col gap-1"><h3 className="text-3xl font-bold text-primary">{stats?.totalManga || 0}</h3><p className="text-sm text-muted-foreground">أعمال</p></div>
-                <div className="flex flex-col gap-1"><h3 className="text-3xl font-bold text-primary">{stats?.totalChapters || 0}</h3><p className="text-sm text-muted-foreground">فصل</p></div>
-                <div className="flex flex-col gap-1"><h3 className="text-3xl font-bold text-primary">{stats?.totalPages || 0}</h3><p className="text-sm text-muted-foreground">صفحة</p></div>
-                <div className="flex flex-col gap-1"><h3 className="text-3xl font-bold text-primary">{stats?.publishedChapters || 0}</h3><p className="text-sm text-muted-foreground">فصل منشور</p></div>
-              </>
-            )}
-          </div>
-        </div>
       </section>
 
       {/* ⭐ Featured */}

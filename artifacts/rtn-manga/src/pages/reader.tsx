@@ -3,8 +3,20 @@ import { useGetChapter, useListChapters } from "@workspace/api-client-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronRight, ChevronLeft, ArrowRight, ArrowLeft } from "lucide-react";
+import { ChevronRight, ChevronLeft, ArrowRight, ArrowLeft, BookOpen } from "lucide-react";
 import { useEffect } from "react";
+
+// Save chapter as read in localStorage (for all users)
+function markChapterRead(mangaId: number, chapterId: number) {
+  try {
+    const key = `read_${mangaId}`;
+    const existing = JSON.parse(localStorage.getItem(key) || "[]") as number[];
+    if (!existing.includes(chapterId)) {
+      existing.push(chapterId);
+      localStorage.setItem(key, JSON.stringify(existing));
+    }
+  } catch {}
+}
 
 export default function Reader() {
   const params = useParams<{ id: string; chapterId: string }>();
@@ -15,10 +27,8 @@ export default function Reader() {
   const { data: chapter, isLoading: chapterLoading } = useGetChapter(id, chapterId);
   const { data: allChapters, isLoading: chaptersLoading } = useListChapters(id);
 
-  // Sort chapters to find next/prev
   const sortedChapters = allChapters?.sort((a, b) => a.number - b.number) || [];
   const currentIndex = sortedChapters.findIndex(c => c.id === chapterId);
-  
   const prevChapter = currentIndex > 0 ? sortedChapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < sortedChapters.length - 1 ? sortedChapters[currentIndex + 1] : null;
 
@@ -34,24 +44,23 @@ export default function Reader() {
     }
   }, [id]);
 
-  // Save reading progress for logged-in users
+  // Mark chapter as read (localStorage) + save progress to DB if logged in
   useEffect(() => {
-    if (!id || !chapterId || isNaN(id) || isNaN(chapterId) || !token) return;
-    fetch(`/api/progress/${id}/${chapterId}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
+    if (!id || !chapterId || isNaN(id) || isNaN(chapterId)) return;
+    markChapterRead(id, chapterId);
+    if (token) {
+      fetch(`/api/progress/${id}/${chapterId}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }
   }, [id, chapterId, token]);
 
-  // Key navigation
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Since it's RTL, Left Arrow -> Next Chapter, Right Arrow -> Prev Chapter
-      if (e.key === "ArrowLeft" && nextChapter) {
-        setLocation(`/manga/${id}/chapter/${nextChapter.id}`);
-      } else if (e.key === "ArrowRight" && prevChapter) {
-        setLocation(`/manga/${id}/chapter/${prevChapter.id}`);
-      }
+      if (e.key === "ArrowLeft" && nextChapter) setLocation(`/manga/${id}/chapter/${nextChapter.id}`);
+      else if (e.key === "ArrowRight" && prevChapter) setLocation(`/manga/${id}/chapter/${prevChapter.id}`);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -82,43 +91,43 @@ export default function Reader() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-zinc-200 pb-24">
+    <div className="min-h-screen bg-background text-foreground pb-24">
       {/* Top Nav */}
-      <div className="sticky top-0 z-50 bg-[#0a0a0a]/90 backdrop-blur border-b border-white/10 p-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="sticky top-0 z-50 bg-background/95 backdrop-blur border-b border-border p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
           <Link href={`/manga/${id}`}>
-            <Button variant="ghost" size="icon" className="hover:bg-white/10">
+            <Button variant="ghost" size="icon" className="hover:bg-secondary">
               <ChevronRight className="h-5 w-5" />
             </Button>
           </Link>
           <div>
             <h1 className="font-bold text-sm md:text-base line-clamp-1">{chapter.manga?.title || "جار التحميل..."}</h1>
-            <p className="text-xs text-zinc-400">الفصل {chapter.number} {chapter.title ? `- ${chapter.title}` : ""}</p>
+            <p className="text-xs text-muted-foreground">الفصل {chapter.number}{chapter.title ? ` - ${chapter.title}` : ""}</p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2">
-          <Link href={prevChapter ? `/manga/${id}/chapter/${prevChapter.id}` : "#"} className={!prevChapter ? "pointer-events-none opacity-50" : ""}>
-            <Button variant="outline" size="sm" className="bg-transparent border-white/20 hover:bg-white/10">
-              <ArrowRight className="h-4 w-4 ml-2" />
+          <Link href={prevChapter ? `/manga/${id}/chapter/${prevChapter.id}` : "#"} className={!prevChapter ? "pointer-events-none opacity-40" : ""}>
+            <Button variant="outline" size="sm">
+              <ArrowRight className="h-4 w-4 ml-1.5" />
               السابق
             </Button>
           </Link>
-          <Link href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"} className={!nextChapter ? "pointer-events-none opacity-50" : ""}>
-            <Button variant="outline" size="sm" className="bg-transparent border-white/20 hover:bg-white/10">
+          <Link href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"} className={!nextChapter ? "pointer-events-none opacity-40" : ""}>
+            <Button variant="outline" size="sm" className="border-primary/50 hover:bg-primary/10 text-primary">
               التالي
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <ArrowLeft className="h-4 w-4 mr-1.5" />
             </Button>
           </Link>
         </div>
       </div>
 
       {/* Reader Area */}
-      <div className="max-w-4xl mx-auto w-full flex flex-col items-center mt-8">
+      <div className="max-w-4xl mx-auto w-full flex flex-col items-center mt-4">
         {chapter.pages && chapter.pages.length > 0 ? (
           <div className="w-full flex flex-col">
             {chapter.pages.sort((a, b) => a.pageNumber - b.pageNumber).map((page) => (
-              <img 
+              <img
                 key={page.id}
                 src={page.imageUrl}
                 alt={`صفحة ${page.pageNumber}`}
@@ -128,25 +137,26 @@ export default function Reader() {
             ))}
           </div>
         ) : (
-          <div className="py-32 text-center text-zinc-500">
-            لا توجد صفحات في هذا الفصل
+          <div className="py-32 text-center text-muted-foreground">
+            <BookOpen className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p>لا توجد صفحات في هذا الفصل</p>
           </div>
         )}
       </div>
 
       {/* Bottom Nav */}
       <div className="max-w-xl mx-auto mt-16 px-4 flex justify-between items-center">
-        <Link href={prevChapter ? `/manga/${id}/chapter/${prevChapter.id}` : "#"} className={!prevChapter ? "pointer-events-none opacity-50" : ""}>
-          <Button variant="outline" size="lg" className="w-32 bg-transparent border-white/20 hover:bg-white/10">
+        <Link href={prevChapter ? `/manga/${id}/chapter/${prevChapter.id}` : "#"} className={!prevChapter ? "pointer-events-none opacity-40" : ""}>
+          <Button variant="outline" size="lg" className="w-32">
             <ArrowRight className="h-5 w-5 ml-2" />
             السابق
           </Button>
         </Link>
         <Link href={`/manga/${id}`}>
-          <Button variant="ghost" className="hover:bg-white/10">الفهرس</Button>
+          <Button variant="ghost">فهرس الفصول</Button>
         </Link>
-        <Link href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"} className={!nextChapter ? "pointer-events-none opacity-50" : ""}>
-          <Button variant="outline" size="lg" className="w-32 bg-transparent border-white/20 hover:bg-white/10 text-primary border-primary/50 hover:bg-primary/20">
+        <Link href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"} className={!nextChapter ? "pointer-events-none opacity-40" : ""}>
+          <Button variant="outline" size="lg" className="w-32 border-primary/50 hover:bg-primary/10 text-primary">
             التالي
             <ArrowLeft className="h-5 w-5 mr-2" />
           </Button>
