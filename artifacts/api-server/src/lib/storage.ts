@@ -1,8 +1,10 @@
 /**
- * Storage — ImgBB only, no local fallback.
+ * Storage — Telegram Bot
  *
- * الطلبات تمرّ عبر corsproxy.io لتجاوز حجب IP سيرفرات Replit.
- * IMGBB_API_KEY must be set in Replit Secrets.
+ * الصور تُرفع إلى قناة Telegram عبر Bot، وتُخدَم عبر proxy endpoint محلي.
+ * المتغيرات المطلوبة في Replit Secrets:
+ *   TELEGRAM_BOT_TOKEN   — توكن البوت
+ *   TELEGRAM_CHANNEL_ID  — معرّف القناة (سالب عادةً، مثال: -1001234567890)
  */
 
 import fs from "fs";
@@ -13,141 +15,119 @@ const workspaceRoot = process.cwd().endsWith(path.join("artifacts", "api-server"
   ? path.resolve(process.cwd(), "../..")
   : process.cwd();
 
-// Keep uploadsDir only for multer's temp landing spot — files are deleted after ImgBB upload.
+// مجلد مؤقت لـ multer فقط — يُحذف الملف بعد الرفع
 export const uploadsDir = path.resolve(workspaceRoot, "artifacts/api-server/uploads");
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-const IMGBB_ENDPOINT = "https://api.imgbb.com/1/upload";
+// ── helpers ──────────────────────────────────────────────────────────────────
 
-// Proxy الطلب عبر corsproxy.io لتجاوز حجب IP
-const PROXY_ENDPOINT = `https://corsproxy.io/?url=${encodeURIComponent(IMGBB_ENDPOINT)}`;
+function requireConfig(): { token: string; channelId: string } {
+  const token     = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const channelId = process.env.TELEGRAM_CHANNEL_ID?.trim();
+  if (!token)     throw new Error("TELEGRAM_BOT_TOKEN غير مضبوط في Replit Secrets");
+  if (!channelId) throw new Error("TELEGRAM_CHANNEL_ID غير مضبوط في Replit Secrets");
+  return { token, channelId };
+}
 
-// Headers تجعل الطلب يبدو كمتصفح عادي
-const BROWSER_HEADERS = {
-  "Content-Type": "application/x-www-form-urlencoded",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Origin": "https://imgbb.com",
-  "Referer": "https://imgbb.com/",
-  "Accept": "application/json, text/plain, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-};
+function mimeFromFilename(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  const map: Record<string, string> = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png",  ".webp": "image/webp",
+    ".gif": "image/gif",  ".avif": "image/avif",
+    ".bmp": "image/bmp",
+  };
+  return map[ext] ?? "image/jpeg";
+}
 
-function requireImgbbKey(): string {
-  const key = process.env.IMGBB_API_KEY?.trim();
-  if (!key) {
+/** رفع buffer مباشرة إلى Telegram وإرجاع رابط الـ proxy */
+async function uploadToTelegram(buffer: Buffer, filename: string): Promise<string> {
+  const { token, channelId } = requireConfig();
+
+  // نستخدم FormData المدمج في Node 20
+  const blob = new Blob([buffer], { type: mimeFromFilename(filename) });
+  const form = new FormData();
+  form.append("chat_id", channelId);
+  form.append("document", blob, filename);
+
+  const res = await axios.post<any>(
+    `https://api.telegram.org/bot${token}/sendDocument`,
+    form,
+    { timeout: 120_000 }
+  );
+
+  const fileId: string | undefined = res.data?.result?.document?.file_id;
+  if (!fileId) {
     throw new Error(
-      "IMGBB_API_KEY is not set. Add it to Replit Secrets — images cannot be saved without it."
+      `Telegram لم يُرجع file_id — استجابة: ${JSON.stringify(res.data).slice(0, 200)}`
     );
   }
-  return key;
+
+  // نخزن رابطاً داخلياً يمر عبر السيرفر ← يخفي التوكن ويضمن الديمومة
+  return `/api/img/${fileId}`;
 }
 
-export function usingImgbb(): boolean {
-  return !!process.env.IMGBB_API_KEY?.trim();
-}
+// ── API العامة ────────────────────────────────────────────────────────────────
 
-interface ImgbbResponse {
-  data: { url: string; display_url: string; image: { url: string } };
-  success: boolean;
-}
+/** دائماً false — لم نعد نستخدم ImgBB */
+export function usingImgbb(): boolean { return false; }
 
 /**
- * إرسال طلب ImgBB عبر proxy مع fallback مباشر.
- */
-async function postToImgbb(params: URLSearchParams): Promise<string> {
-  // المحاولة الأولى: عبر corsproxy.io
-  try {
-    const res = await axios.post<ImgbbResponse>(PROXY_ENDPOINT, params, {
-      headers: BROWSER_HEADERS,
-      timeout: 90000,
-    });
-    const url = res.data?.data?.url;
-    if (url) return url;
-  } catch (proxyErr: any) {
-    // إذا فشل الـ proxy جرّب مباشرة
-    const msg = proxyErr?.response?.data?.error?.message ?? proxyErr?.message ?? String(proxyErr);
-    if (msg.toLowerCase().includes("forbidden") || msg.includes("103")) {
-      // لا فائدة من المحاولة المباشرة إذا كان الخطأ حجب IP
-      throw new Error(`ImgBB upload failed (IP blocked): ${msg}`);
-    }
-  }
-
-  // المحاولة الثانية: مباشرة مع browser headers
-  const res = await axios.post<ImgbbResponse>(IMGBB_ENDPOINT, params, {
-    headers: BROWSER_HEADERS,
-    timeout: 60000,
-  });
-  const url = res.data?.data?.url;
-  if (!url) throw new Error("ImgBB returned no URL");
-  return url;
-}
-
-/**
- * Upload a local file to ImgBB via proxy.
- * Deletes the local file afterwards (it was only a multer temp file).
+ * رفع ملف محلي (multer temp) إلى Telegram ثم حذفه.
+ * يرمي خطأ إذا فشل الرفع — لا fallback محلي.
  */
 export async function storeUploadedFile(
   localFilePath: string,
   filename: string
 ): Promise<string> {
-  const key = requireImgbbKey();
-
-  let base64: string;
+  let buffer: Buffer;
   try {
-    base64 = fs.readFileSync(localFilePath).toString("base64");
+    buffer = fs.readFileSync(localFilePath);
   } catch (err) {
-    throw new Error(`Cannot read temp file for upload: ${err}`);
+    throw new Error(`تعذّر قراءة الملف المؤقت: ${err}`);
   }
 
-  const params = new URLSearchParams();
-  params.append("key", key);
-  params.append("image", base64);
-  params.append("name", filename);
-
   try {
-    const url = await postToImgbb(params);
-    try { fs.unlinkSync(localFilePath); } catch { }
+    const url = await uploadToTelegram(buffer, filename);
+    try { fs.unlinkSync(localFilePath); } catch { /* تجاهل */ }
     return url;
   } catch (err: any) {
-    try { fs.unlinkSync(localFilePath); } catch { }
-    throw new Error(`ImgBB upload failed: ${err?.response?.data?.error?.message ?? err?.message ?? err}`);
+    try { fs.unlinkSync(localFilePath); } catch { /* تجاهل */ }
+    throw new Error(`فشل رفع الصورة إلى Telegram: ${err?.response?.data?.description ?? err?.message ?? err}`);
   }
 }
 
 /**
- * Upload a remote image URL to ImgBB via proxy.
+ * تنزيل صورة من رابط خارجي ثم رفعها إلى Telegram.
+ * يُستخدم في الاستيراد البعيد (remote import).
  */
 export async function storeRemoteImage(
   imageUrl: string,
-  _filename: string,
-  _referer: string
+  filename: string,
+  referer: string
 ): Promise<string> {
-  const key = requireImgbbKey();
+  // تنزيل الصورة أولاً
+  const imgRes = await axios.get<ArrayBuffer>(imageUrl, {
+    responseType: "arraybuffer",
+    timeout: 60_000,
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "Referer": referer || new URL(imageUrl).origin,
+      "Accept": "image/*,*/*",
+    },
+    maxRedirects: 10,
+  });
 
-  const params = new URLSearchParams();
-  params.append("key", key);
-  params.append("image", imageUrl);
-
-  try {
-    return await postToImgbb(params);
-  } catch (err: any) {
-    throw new Error(`ImgBB remote upload failed for ${imageUrl}: ${err?.response?.data?.error?.message ?? err?.message ?? err}`);
-  }
+  const buffer = Buffer.from(imgRes.data);
+  return await uploadToTelegram(buffer, filename);
 }
 
 /**
- * Upload a file buffer directly to ImgBB via proxy (used by migration script).
+ * رفع buffer مباشرة إلى Telegram (مستخدَم في سكريبت الترحيل).
  */
 export async function uploadBufferToImgbb(
   buffer: Buffer,
   filename: string
 ): Promise<string> {
-  const key = requireImgbbKey();
-
-  const params = new URLSearchParams();
-  params.append("key", key);
-  params.append("image", buffer.toString("base64"));
-  params.append("name", filename);
-
-  return await postToImgbb(params);
+  return await uploadToTelegram(buffer, filename);
 }
