@@ -3,3 +3,5 @@ export * from "./chapters";
 export * from "./pages";
 export * from "./users";
 export * from "./comments";
+export * from "./user_library";
+export * from "./reading_progress";

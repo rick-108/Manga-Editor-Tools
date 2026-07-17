@@ -8,6 +8,8 @@ import remoteRouter from "./remote";
 import authRouter from "./auth";
 import commentsRouter from "./comments";
 import imgRouter from "./img";
+import libraryRouter from "./library";
+import progressRouter from "./progress";
 
 const router: IRouter = Router();
 
@@ -20,5 +22,7 @@ router.use(remoteRouter);
 router.use(authRouter);
 router.use(commentsRouter);
 router.use(imgRouter);
+router.use(libraryRouter);
+router.use(progressRouter);
 
 export default router;

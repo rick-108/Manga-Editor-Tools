@@ -77,11 +77,12 @@ export default function Publisher() {
       </div>
 
       <Tabs defaultValue="remote" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto">
+        <TabsList className="grid w-full grid-cols-5 h-auto">
           <TabsTrigger value="remote" className="py-3">📥 استيراد بعيد</TabsTrigger>
           <TabsTrigger value="add-chapter" className="py-3">➕ رفع يدوي</TabsTrigger>
           <TabsTrigger value="pending" className="py-3">⏳ الفصول المعلقة</TabsTrigger>
           <TabsTrigger value="create-manga" className="py-3">📚 إنشاء مانغا</TabsTrigger>
+          <TabsTrigger value="featured" className="py-3">⭐ أعمال جديدة</TabsTrigger>
         </TabsList>
         
         <div className="mt-6 bg-card border border-border rounded-xl p-6 shadow-sm">
@@ -96,6 +97,9 @@ export default function Publisher() {
           </TabsContent>
           <TabsContent value="create-manga">
             <CreateMangaForm token={publisherToken} />
+          </TabsContent>
+          <TabsContent value="featured">
+            <FeaturedManager token={publisherToken} />
           </TabsContent>
         </div>
       </Tabs>
@@ -811,6 +815,101 @@ function PendingChapterCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Featured Manager ────────────────────────────────────────────────────────
+
+type MangaItem = {
+  id: number;
+  title: string;
+  coverImage: string | null;
+  featured: boolean;
+};
+
+function FeaturedManager({ token }: { token: string }) {
+  const { data: mangaData, isLoading, refetch } = useListManga({ limit: 200 });
+  const { toast } = useToast();
+  const [toggling, setToggling] = useState<number | null>(null);
+
+  const toggle = async (id: number) => {
+    setToggling(id);
+    try {
+      const res = await fetch(`/api/manga/${id}/feature`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error();
+      await refetch();
+      toast({ title: "تم تحديث حالة العمل" });
+    } catch {
+      toast({ variant: "destructive", title: "حدث خطأ أثناء التحديث" });
+    }
+    setToggling(null);
+  };
+
+  const all = (mangaData?.data ?? []) as MangaItem[];
+  const featured = all.filter((m) => m.featured);
+  const rest = all.filter((m) => !m.featured);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-16 bg-secondary/40 rounded-xl animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  const MangaRow = ({ manga, isFeatured }: { manga: MangaItem; isFeatured: boolean }) => (
+    <div className="flex items-center gap-4 p-3 rounded-xl bg-secondary/30 border border-border/50">
+      <div className="w-10 h-14 rounded-lg overflow-hidden bg-secondary/50 flex-shrink-0">
+        <img
+          src={manga.coverImage || "https://placehold.co/100x150/1a1a1a/666?text="}
+          alt={manga.title}
+          className="w-full h-full object-cover"
+        />
+      </div>
+      <span className="flex-1 font-medium text-sm line-clamp-1">{manga.title}</span>
+      <Button
+        size="sm"
+        variant={isFeatured ? "destructive" : "default"}
+        className="shrink-0"
+        disabled={toggling === manga.id}
+        onClick={() => toggle(manga.id)}
+      >
+        {isFeatured ? "إزالة" : "إضافة للأعمال الجديدة"}
+      </Button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg font-bold">⭐ الأعمال الجديدة الحالية</span>
+          <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold">{featured.length}</span>
+        </div>
+        {featured.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground bg-secondary/20 rounded-xl border border-border/50">
+            لم تُضَف أي أعمال بعد. اختَر من القائمة أدناه.
+          </div>
+        ) : (
+          <div className="space-y-2">{featured.map((m) => <MangaRow key={m.id} manga={m} isFeatured={true} />)}</div>
+        )}
+      </div>
+      <div>
+        <p className="text-lg font-bold mb-4">جميع الأعمال</p>
+        {rest.length === 0 ? (
+          <p className="text-center text-muted-foreground py-6">جميع الأعمال مضافة بالفعل.</p>
+        ) : (
+          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            {rest.map((m) => <MangaRow key={m.id} manga={m} isFeatured={false} />)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

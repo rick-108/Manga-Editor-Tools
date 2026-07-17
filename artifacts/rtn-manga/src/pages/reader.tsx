@@ -1,5 +1,6 @@
 import { useParams, Link, useLocation } from "wouter";
 import { useGetChapter, useListChapters } from "@workspace/api-client-react";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, ChevronLeft, ArrowRight, ArrowLeft } from "lucide-react";
@@ -21,14 +22,26 @@ export default function Reader() {
   const prevChapter = currentIndex > 0 ? sortedChapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < sortedChapters.length - 1 ? sortedChapters[currentIndex + 1] : null;
 
-  // Track view on mount (once per manga per session)
+  const { token } = useAuth();
+
+  // Track view (once per manga per session)
   useEffect(() => {
     if (!id || isNaN(id)) return;
     const key = `viewed_${id}`;
-    if (sessionStorage.getItem(key)) return;
-    sessionStorage.setItem(key, "1");
-    fetch(`/api/manga/${id}/view`, { method: "POST" }).catch(() => {});
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, "1");
+      fetch(`/api/manga/${id}/view`, { method: "POST" }).catch(() => {});
+    }
   }, [id]);
+
+  // Save reading progress for logged-in users
+  useEffect(() => {
+    if (!id || !chapterId || isNaN(id) || isNaN(chapterId) || !token) return;
+    fetch(`/api/progress/${id}/${chapterId}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }, [id, chapterId, token]);
 
   // Key navigation
   useEffect(() => {

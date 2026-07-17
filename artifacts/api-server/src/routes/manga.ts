@@ -118,6 +118,22 @@ router.get("/manga/latest-updates", async (_req, res): Promise<void> => {
   res.json(result);
 });
 
+// GET /manga/featured — curated "New Works" list (must be before /:id)
+router.get("/manga/featured", async (_req, res): Promise<void> => {
+  const featured = await db.select().from(mangaTable).where(eq(mangaTable.featured, true)).orderBy(desc(mangaTable.updatedAt));
+  res.json(featured);
+});
+
+// PATCH /manga/:id/feature — toggle featured flag (publisher only)
+router.patch("/manga/:id/feature", requirePublisher, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const [manga] = await db.select().from(mangaTable).where(eq(mangaTable.id, id));
+  if (!manga) { res.status(404).json({ error: "Not found" }); return; }
+  const [updated] = await db.update(mangaTable).set({ featured: !manga.featured }).where(eq(mangaTable.id, id)).returning();
+  res.json({ id: updated.id, featured: updated.featured });
+});
+
 // GET /manga/trending — top by view count (must be before /:id)
 router.get("/manga/trending", async (_req, res): Promise<void> => {
   const limit = Math.min(Number(_req.query.limit) || 10, 20);
