@@ -7,6 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
 
+function MangaTypeLabel({ type }: { type: string }) {
+  if (type === "manga") return "مانغا";
+  return "مانهوا";
+}
+
 export default function MangaList() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -28,13 +33,13 @@ export default function MangaList() {
   return (
     <div className="container py-8 px-4 md:px-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">الفهرس</h1>
-        
+        <h1 className="text-3xl font-bold tracking-tight">المكتبة</h1>
+
         <form onSubmit={handleSearch} className="flex w-full md:w-auto items-center gap-2">
           <div className="relative w-full md:w-64">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="البحث عن عمل..." 
+            <Input
+              placeholder="البحث عن عمل..."
               className="pr-9"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -48,7 +53,6 @@ export default function MangaList() {
               <SelectItem value="all">الكل</SelectItem>
               <SelectItem value="manga">مانغا</SelectItem>
               <SelectItem value="manhwa">مانهوا</SelectItem>
-              <SelectItem value="manhua">مانهوا صينية</SelectItem>
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={setStatus}>
@@ -85,16 +89,16 @@ export default function MangaList() {
           {data?.data.map((manga) => (
             <Link key={manga.id} href={`/manga/${manga.id}`} className="group relative rounded-lg overflow-hidden flex flex-col h-full">
               <div className="relative aspect-[2/3] overflow-hidden rounded-lg mb-3 bg-secondary/30">
-                <img 
-                  src={manga.coverImage || "https://placehold.co/400x600/1a1a1a/666?text=No+Cover"} 
+                <img
+                  src={manga.coverImage || "https://placehold.co/400x600/1a1a1a/666?text=No+Cover"}
                   alt={manga.title}
                   className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-105"
                   loading="lazy"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className="absolute top-2 right-2 flex flex-col gap-1">
+                <div className="absolute top-2 right-2">
                   <span className="bg-primary/90 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-sm">
-                    {manga.type === 'manhwa' ? 'مانهوا' : manga.type === 'manhua' ? 'مانهوا صينية' : 'مانغا'}
+                    <MangaTypeLabel type={manga.type} />
                   </span>
                 </div>
               </div>
@@ -102,7 +106,7 @@ export default function MangaList() {
                 {manga.title}
               </h3>
               <p className="text-xs text-muted-foreground">
-                {manga.status === 'ongoing' ? 'مستمر' : manga.status === 'completed' ? 'مكتمل' : 'متوقف'}
+                {manga.status === "ongoing" ? "مستمر" : manga.status === "completed" ? "مكتمل" : "متوقف"}
               </p>
             </Link>
           ))}

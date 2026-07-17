@@ -118,6 +118,28 @@ router.get("/manga/latest-updates", async (_req, res): Promise<void> => {
   res.json(result);
 });
 
+// GET /manga/trending — top by view count (must be before /:id)
+router.get("/manga/trending", async (_req, res): Promise<void> => {
+  const limit = Math.min(Number(_req.query.limit) || 10, 20);
+  const trending = await db
+    .select()
+    .from(mangaTable)
+    .orderBy(desc(mangaTable.viewCount))
+    .limit(limit);
+  res.json(trending);
+});
+
+// POST /manga/:id/view — increment view count
+router.post("/manga/:id/view", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  await db
+    .update(mangaTable)
+    .set({ viewCount: sql`${mangaTable.viewCount} + 1` })
+    .where(eq(mangaTable.id, id));
+  res.json({ ok: true });
+});
+
 router.get("/manga/:id", async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const id = parseInt(raw, 10);

@@ -1,9 +1,12 @@
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
+import { Sun, Moon } from "lucide-react";
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -15,10 +18,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 RTN مانغا
               </Link>
               <Link href="/manga" className="transition-colors hover:text-foreground/80 text-foreground/60">
-                الفهرس
+                المكتبة
               </Link>
             </nav>
-            <div className="flex items-center space-x-4 space-x-reverse">
+            <div className="flex items-center space-x-3 space-x-reverse">
+              <button
+                onClick={toggle}
+                aria-label="تبديل المظهر"
+                className="rounded-full p-2 hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
               {user ? (
                 <>
                   <Link href="/profile" className="text-sm font-medium hover:text-primary transition-colors">

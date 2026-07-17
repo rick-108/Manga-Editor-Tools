@@ -21,6 +21,15 @@ export default function Reader() {
   const prevChapter = currentIndex > 0 ? sortedChapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < sortedChapters.length - 1 ? sortedChapters[currentIndex + 1] : null;
 
+  // Track view on mount (once per manga per session)
+  useEffect(() => {
+    if (!id || isNaN(id)) return;
+    const key = `viewed_${id}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, "1");
+    fetch(`/api/manga/${id}/view`, { method: "POST" }).catch(() => {});
+  }, [id]);
+
   // Key navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

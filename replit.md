@@ -99,6 +99,10 @@ pnpm install
 - `NEON_DATABASE_URL` يُقدَّم على `DATABASE_URL` — لا تحذفه
 - `TELEGRAM_CHANNEL_ID` يجب أن يكون سالباً للقنوات الخاصة
 - Remote import يسحب الصور ثم يرفعها إلى Telegram (لا يرسل الرابط مباشرة)
+- `view_count` عمود في جدول manga — يُزاد عند فتح أي فصل (مرة واحدة لكل جلسة، مخزَّنة في sessionStorage)
+- `GET /api/manga/trending` — يرجع أعلى 10 أعمال بحسب view_count
+- `POST /api/manga/:id/view` — يزيد view_count بمقدار 1 (يُستدعى من reader.tsx)
+- المظهر الداكن/الفاتح: يُخزَّن في localStorage بمفتاح "theme"، ويُطبَّق عبر class "light" على عنصر html
 
 ## User preferences
 
