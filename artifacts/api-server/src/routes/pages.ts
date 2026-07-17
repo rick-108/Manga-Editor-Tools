@@ -3,10 +3,9 @@ import { eq, and, asc, sql } from "drizzle-orm";
 import { db, pagesTable } from "@workspace/db";
 import { ReorderPagesBody } from "@workspace/api-zod";
 import { requirePublisher } from "../middlewares/publisher";
-import { storeUploadedFile, uploadsDir, usingImgbb } from "../lib/storage";
+import { storeUploadedFile, uploadsDir } from "../lib/storage";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => { cb(null, uploadsDir); },
@@ -40,7 +39,7 @@ router.get("/manga/:mangaId/chapters/:chapterId/pages", async (req, res): Promis
   res.json(pages.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() })));
 });
 
-// Upload pages — fixed: field name is "pages" to match multer
+// رفع صفحات الفصل — كل الصور تذهب حصراً إلى Telegram
 router.post(
   "/manga/:mangaId/chapters/:chapterId/pages/upload",
   requirePublisher,
@@ -67,17 +66,17 @@ router.post(
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const pageNumber = startPageNumber + i;
-      // Upload to ImgBB if key is set, otherwise keep local path
+      // يرفع الصورة إلى Telegram ويُرجع رابط /api/img/{fileId}
       const imageUrl = await storeUploadedFile(file.path, file.filename);
       const [page] = await db.insert(pagesTable).values({ chapterId, pageNumber, imageUrl }).returning();
       insertedPages.push({ ...page, createdAt: page.createdAt.toISOString() });
     }
 
-    res.status(201).json({ pages: insertedPages, storage: usingImgbb() ? "imgbb" : "local" });
+    res.status(201).json({ pages: insertedPages, storage: "telegram" });
   }
 );
 
-// Upload cover image for manga
+// رفع غلاف المانغا — يمر عبر Telegram أيضاً
 router.post(
   "/uploads/cover",
   requirePublisher,
@@ -86,7 +85,7 @@ router.post(
     const file = req.file;
     if (!file) { res.status(400).json({ error: "No file uploaded" }); return; }
     const imageUrl = await storeUploadedFile(file.path, file.filename);
-    res.json({ url: imageUrl, storage: usingImgbb() ? "imgbb" : "local" });
+    res.json({ url: imageUrl, storage: "telegram" });
   }
 );
 
@@ -125,12 +124,7 @@ router.delete("/manga/:mangaId/chapters/:chapterId/pages/:pageId", requirePublis
 
   if (!deleted) { res.status(404).json({ error: "Page not found" }); return; }
 
-  if (deleted.imageUrl.startsWith("/api/uploads/")) {
-    const filename = deleted.imageUrl.replace("/api/uploads/", "");
-    const filePath = path.resolve(uploadsDir, filename);
-    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { }
-  }
-
+  // الصور على Telegram — لا يوجد ملف محلي لحذفه
   res.sendStatus(204);
 });
 
