@@ -77,12 +77,12 @@ export default function Publisher() {
       </div>
 
       <Tabs defaultValue="remote" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 h-auto">
-          <TabsTrigger value="remote" className="py-3">📥 استيراد بعيد</TabsTrigger>
-          <TabsTrigger value="add-chapter" className="py-3">➕ رفع يدوي</TabsTrigger>
-          <TabsTrigger value="pending" className="py-3">⏳ الفصول المعلقة</TabsTrigger>
-          <TabsTrigger value="create-manga" className="py-3">📚 إنشاء مانغا</TabsTrigger>
-          <TabsTrigger value="featured" className="py-3">⭐ أعمال جديدة</TabsTrigger>
+        <TabsList className="flex w-full h-auto overflow-x-auto gap-1 justify-start p-1.5 rounded-xl bg-secondary/50 scrollbar-none">
+          <TabsTrigger value="remote" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">📥 استيراد بعيد</TabsTrigger>
+          <TabsTrigger value="add-chapter" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">➕ رفع يدوي</TabsTrigger>
+          <TabsTrigger value="pending" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">⏳ الفصول المعلقة</TabsTrigger>
+          <TabsTrigger value="create-manga" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">📚 إنشاء مانغا</TabsTrigger>
+          <TabsTrigger value="featured" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">⭐ أعمال جديدة</TabsTrigger>
         </TabsList>
         
         <div className="mt-6 bg-card border border-border rounded-xl p-6 shadow-sm">

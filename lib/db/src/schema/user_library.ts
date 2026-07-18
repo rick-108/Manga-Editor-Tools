@@ -1,10 +1,10 @@
-import { pgTable, serial, integer, timestamp, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, unique } from "drizzle-orm/pg-core";
 
 export const userLibraryTable = pgTable(
   "user_library",
   {
     id: serial("id").primaryKey(),
-    userId: integer("user_id").notNull(),
+    userId: text("user_id").notNull(),
     mangaId: integer("manga_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
