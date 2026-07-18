@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk, Show } from "@clerk/react";
 import { useTheme } from "@/hooks/use-theme";
+import { useUserProfile } from "@/contexts/user-profile-context";
 import { X, Home, BookOpen, Star, History, LogIn, UserPlus, User, Sun, Moon, BookMarked, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
@@ -16,6 +17,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
   const { user } = useUser();
   const { signOut } = useClerk();
   const { theme, toggle } = useTheme();
+  const { dbProfile } = useUserProfile();
   const [location] = useLocation();
 
   useEffect(() => { onClose(); }, [location]);
@@ -25,6 +27,8 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
     else document.body.style.overflow = "";
     return () => { document.body.style.overflow = ""; };
   }, [open]);
+
+  const avatarSrc = dbProfile?.avatarUrl || user?.imageUrl || null;
 
   const navItems = [
     { href: "/", label: "الصفحة الرئيسية", icon: Home },
@@ -58,15 +62,20 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
             <Link href="/profile">
               <div className="flex items-center gap-4 cursor-pointer group">
                 <div className="w-14 h-14 rounded-full bg-primary/15 border-2 border-primary/30 flex items-center justify-center text-primary overflow-hidden shrink-0 group-hover:border-primary transition-colors">
-                  {user?.imageUrl ? (
-                    <img src={user.imageUrl} alt={user.username ?? ""} className="w-full h-full object-cover" />
+                  {avatarSrc ? (
+                    <img
+                      src={avatarSrc}
+                      alt={user?.username ?? ""}
+                      className="w-full h-full object-cover"
+                      key={avatarSrc}
+                    />
                   ) : (
                     <User className="w-7 h-7" />
                   )}
                 </div>
                 <div>
                   <p className="font-bold text-base group-hover:text-primary transition-colors">
-                    {user?.username ?? user?.firstName ?? "المستخدم"}
+                    {dbProfile?.displayName || user?.username || user?.firstName || "المستخدم"}
                   </p>
                   <p className="text-xs text-muted-foreground">الملف الشخصي</p>
                 </div>

@@ -6,10 +6,11 @@ import { useLocation, Link } from "wouter";
 import { format } from "date-fns";
 import {
   LogOut, User as UserIcon, History, BookMarked,
-  BookOpen, Camera, Check, Pencil, X,
+  BookOpen, Camera, Check, Pencil, X, Zap,
 } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useUserProfile } from "@/contexts/user-profile-context";
 
 type LibraryManga = {
   id: number; title: string; coverImage: string | null;
@@ -19,7 +20,6 @@ type ProgressItem = {
   mangaId: number; mangaTitle: string; mangaCover: string | null;
   chapterId: number; chapterNumber: number | null; updatedAt: string;
 };
-type UserProfileDB = { displayName: string | null; avatarUrl: string | null };
 
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -28,9 +28,7 @@ export default function Profile() {
   const { signOut } = useClerk();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-
-  // DB profile (display name + telegram avatar)
-  const [dbProfile, setDbProfile] = useState<UserProfileDB | null>(null);
+  const { dbProfile, refreshProfile } = useUserProfile();
 
   // Edit states
   const [editingName, setEditingName] = useState(false);
@@ -50,13 +48,9 @@ export default function Profile() {
     if (isLoaded && !user) setLocation("/sign-in");
   }, [isLoaded, user, setLocation]);
 
-  // Load DB profile, library, progress
+  // Load library and progress
   useEffect(() => {
     if (!user) return;
-    fetch("/api/profile").then(r => r.json()).then(d => {
-      if (d && !d.error) setDbProfile(d);
-    }).catch(() => {});
-
     fetch("/api/library").then(r => r.json()).then(d => {
       if (Array.isArray(d)) setLibrary(d);
     }).catch(() => {}).finally(() => setLibLoading(false));
@@ -78,7 +72,7 @@ export default function Profile() {
       });
       const d = await r.json();
       if (r.ok) {
-        setDbProfile(prev => ({ ...prev!, displayName: d.displayName }));
+        refreshProfile();
         setEditingName(false);
         toast({ title: "تم حفظ الاسم بنجاح ✓" });
       } else {
@@ -102,7 +96,7 @@ export default function Profile() {
       const r = await fetch("/api/profile/avatar", { method: "POST", body: form });
       const d = await r.json();
       if (r.ok) {
-        setDbProfile(prev => ({ ...prev!, avatarUrl: d.avatarUrl }));
+        refreshProfile(); // Sync context → sidebar updates immediately
         toast({ title: "تم رفع الصورة بنجاح ✓" });
       } else {
         toast({ variant: "destructive", title: d.error || "فشل رفع الصورة" });
@@ -134,6 +128,12 @@ export default function Profile() {
   const avatarSrc = dbProfile?.avatarUrl || user.imageUrl || null;
   const joinedAt = user.createdAt ? format(new Date(user.createdAt), "yyyy/MM/dd") : "";
 
+  // XP calculations
+  const currentXp = dbProfile?.currentXp ?? 0;
+  const level = dbProfile?.level ?? 1;
+  const xpInLevel = currentXp % 100;
+  const xpProgress = xpInLevel; // out of 100
+
   return (
     <div className="container max-w-4xl mx-auto py-12 px-4 space-y-10">
 
@@ -146,7 +146,7 @@ export default function Profile() {
             <div className="relative shrink-0">
               <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center text-primary border-4 border-background overflow-hidden shadow-md">
                 {avatarSrc ? (
-                  <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover" />
+                  <img src={avatarSrc} alt={displayName} className="w-full h-full object-cover" key={avatarSrc} />
                 ) : (
                   <UserIcon className="w-10 h-10" />
                 )}
@@ -233,6 +233,28 @@ export default function Profile() {
             <LogOut className="w-4 h-4" />
             تسجيل الخروج
           </Button>
+        </div>
+
+        {/* ── XP Progress Bar ─────────────────────────────────────────────── */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <div className="flex items-center gap-1.5 font-semibold text-primary">
+              <Zap className="w-4 h-4" />
+              <span>مستوى {level}</span>
+            </div>
+            <span className="text-muted-foreground text-xs">
+              {xpInLevel} / 100 XP
+            </span>
+          </div>
+          <div className="h-2.5 w-full bg-secondary rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-500"
+              style={{ width: `${xpProgress}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground/60 text-left">
+            إجمالي النقاط: {currentXp} XP
+          </p>
         </div>
 
         {/* Upload hint */}

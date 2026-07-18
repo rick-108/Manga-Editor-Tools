@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
+import { UserProfileProvider } from "@/contexts/user-profile-context";
 
 import Home from "@/pages/home";
 import MangaList from "@/pages/manga-list";
@@ -165,9 +166,11 @@ function ClerkProviderWithRoutes() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <AuthProvider>
-            <ClerkQueryCacheInvalidator />
-            <Router />
-            <Toaster />
+            <UserProfileProvider>
+              <ClerkQueryCacheInvalidator />
+              <Router />
+              <Toaster />
+            </UserProfileProvider>
           </AuthProvider>
         </TooltipProvider>
       </QueryClientProvider>

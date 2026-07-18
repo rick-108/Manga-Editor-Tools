@@ -3,6 +3,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { db, commentsTable, usersTable } from "@workspace/db";
 import { AddMangaCommentBody } from "@workspace/api-zod";
 import { requireUser } from "./auth";
+import { awardXp } from "../lib/xp";
 
 const router: IRouter = Router();
 
@@ -39,10 +40,19 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
   const parsed = AddMangaCommentBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
+  // Reject empty content (extra guard on top of Zod)
+  if (!parsed.data.content.trim()) {
+    res.status(400).json({ error: "التعليق لا يمكن أن يكون فارغاً" });
+    return;
+  }
+
   const [comment] = await db
     .insert(commentsTable)
     .values({ mangaId, userId: req.userId, content: parsed.data.content })
     .returning();
+
+  // Award 10 XP for the new comment (once per comment via unique constraint)
+  awardXp(req.userId, "comment", comment.id, 10).catch(() => {});
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.userId));
 

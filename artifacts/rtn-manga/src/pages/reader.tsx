@@ -3,7 +3,7 @@ import { useGetChapter, useListChapters } from "@workspace/api-client-react";
 import { useAuth } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronRight, ArrowRight, ArrowLeft, BookOpen } from "lucide-react";
+import { ChevronRight, ArrowRight, ArrowLeft, BookOpen, CheckCircle } from "lucide-react";
 import { useEffect, useState, useCallback, useRef } from "react";
 
 function markChapterRead(mangaId: number, chapterId: number) {
@@ -32,6 +32,35 @@ export default function Reader() {
   const prevChapter = currentIndex > 0 ? sortedChapters[currentIndex - 1] : null;
   const nextChapter = currentIndex < sortedChapters.length - 1 ? sortedChapters[currentIndex + 1] : null;
 
+  // ── Last page detection ─────────────────────────────────────────────────────
+  const [lastPageSeen, setLastPageSeen] = useState(false);
+  const lastPageRef = useRef<HTMLImageElement | null>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  const attachLastPageObserver = useCallback((el: HTMLImageElement | null) => {
+    if (observerRef.current) observerRef.current.disconnect();
+    lastPageRef.current = el;
+    if (!el) return;
+    observerRef.current = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setLastPageSeen(true); },
+      { threshold: 0.3 }
+    );
+    observerRef.current.observe(el);
+  }, []);
+
+  // Reset when chapter changes
+  useEffect(() => {
+    setLastPageSeen(false);
+    return () => { observerRef.current?.disconnect(); };
+  }, [chapterId]);
+
+  // ── Award XP on chapter completion ─────────────────────────────────────────
+  const awardChapterXp = useCallback(() => {
+    if (isSignedIn && lastPageSeen) {
+      fetch(`/api/xp/chapter-complete/${id}/${chapterId}`, { method: "POST" }).catch(() => {});
+    }
+  }, [isSignedIn, lastPageSeen, id, chapterId]);
+
   // ── Immersive mode ──────────────────────────────────────────────────────────
   const [barsVisible, setBarsVisible] = useState(true);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,13 +73,12 @@ export default function Reader() {
   const handleScreenTap = useCallback(() => {
     setBarsVisible(prev => {
       const next = !prev;
-      if (next) resetTimer(); // visible → start auto-hide countdown
+      if (next) resetTimer();
       else if (hideTimer.current) clearTimeout(hideTimer.current);
       return next;
     });
   }, [resetTimer]);
 
-  // Start auto-hide on mount
   useEffect(() => {
     resetTimer();
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
@@ -59,12 +87,16 @@ export default function Reader() {
   // ── Keyboard navigation ─────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" && nextChapter) setLocation(`/manga/${id}/chapter/${nextChapter.id}`);
-      else if (e.key === "ArrowRight" && prevChapter) setLocation(`/manga/${id}/chapter/${prevChapter.id}`);
+      if (e.key === "ArrowLeft" && nextChapter) {
+        awardChapterXp();
+        setLocation(`/manga/${id}/chapter/${nextChapter.id}`);
+      } else if (e.key === "ArrowRight" && prevChapter) {
+        setLocation(`/manga/${id}/chapter/${prevChapter.id}`);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [nextChapter, prevChapter, id, setLocation]);
+  }, [nextChapter, prevChapter, id, setLocation, awardChapterXp]);
 
   // ── Side effects ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -111,6 +143,11 @@ export default function Reader() {
     barsVisible ? "opacity-100 translate-y-0" : "opacity-0 pointer-events-none"
   }`;
 
+  const sortedPages = chapter.pages
+    ? [...chapter.pages].sort((a, b) => a.pageNumber - b.pageNumber)
+    : [];
+  const lastPage = sortedPages[sortedPages.length - 1];
+
   return (
     <div
       className="min-h-screen bg-background text-foreground select-none"
@@ -145,32 +182,49 @@ export default function Reader() {
               <ArrowRight className="h-4 w-4 ml-1.5" />السابق
             </Button>
           </Link>
-          <Link
-            href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"}
-            className={!nextChapter ? "pointer-events-none opacity-40" : ""}
-          >
-            <Button variant="outline" size="sm" className="border-primary/50 hover:bg-primary/10 text-primary">
-              التالي<ArrowLeft className="h-4 w-4 mr-1.5" />
-            </Button>
-          </Link>
+          {nextChapter ? (
+            <Link href={`/manga/${id}/chapter/${nextChapter.id}`}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-primary/50 hover:bg-primary/10 text-primary"
+                onClick={awardChapterXp}
+              >
+                التالي<ArrowLeft className="h-4 w-4 mr-1.5" />
+              </Button>
+            </Link>
+          ) : (
+            <Link href={`/manga/${id}`}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-primary/50 hover:bg-primary/10 text-primary"
+                onClick={awardChapterXp}
+              >
+                <CheckCircle className="h-4 w-4 ml-1.5" />إنهاء
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
       {/* ── Pages ───────────────────────────────────────────────────────────── */}
       <div className="max-w-4xl mx-auto w-full flex flex-col items-center pt-[72px] pb-[88px]">
-        {chapter.pages && chapter.pages.length > 0 ? (
+        {sortedPages.length > 0 ? (
           <div className="w-full flex flex-col">
-            {chapter.pages
-              .sort((a, b) => a.pageNumber - b.pageNumber)
-              .map((page) => (
+            {sortedPages.map((page, idx) => {
+              const isLast = lastPage && page.id === lastPage.id;
+              return (
                 <img
                   key={page.id}
+                  ref={isLast ? attachLastPageObserver : undefined}
                   src={page.imageUrl}
                   alt={`صفحة ${page.pageNumber}`}
                   className="w-full object-contain block"
-                  loading="lazy"
+                  loading={idx < 3 ? "eager" : "lazy"}
                 />
-              ))}
+              );
+            })}
           </div>
         ) : (
           <div className="py-32 text-center text-muted-foreground">
@@ -198,14 +252,29 @@ export default function Reader() {
           {currentIndex + 1} / {sortedChapters.length}
         </span>
 
-        <Link
-          href={nextChapter ? `/manga/${id}/chapter/${nextChapter.id}` : "#"}
-          className={!nextChapter ? "pointer-events-none opacity-40" : ""}
-        >
-          <Button variant="outline" size="lg" className="w-28 border-primary/50 hover:bg-primary/10 text-primary">
-            التالي<ArrowLeft className="h-5 w-5 mr-2" />
-          </Button>
-        </Link>
+        {nextChapter ? (
+          <Link href={`/manga/${id}/chapter/${nextChapter.id}`}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-28 border-primary/50 hover:bg-primary/10 text-primary"
+              onClick={awardChapterXp}
+            >
+              التالي<ArrowLeft className="h-5 w-5 mr-2" />
+            </Button>
+          </Link>
+        ) : (
+          <Link href={`/manga/${id}`}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-36 border-primary/50 hover:bg-primary/10 text-primary"
+              onClick={awardChapterXp}
+            >
+              <CheckCircle className="h-5 w-5 ml-2" />إنهاء الفصل
+            </Button>
+          </Link>
+        )}
       </div>
     </div>
   );

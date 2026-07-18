@@ -33,7 +33,7 @@ export default function MangaList() {
   return (
     <div className="container py-8 px-4 md:px-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">المكتبة</h1>
+        <h1 className="text-3xl font-bold tracking-tight">تصفح الأعمال</h1>
 
         <form onSubmit={handleSearch} className="flex w-full md:w-auto items-center gap-2">
           <div className="relative w-full md:w-64">
