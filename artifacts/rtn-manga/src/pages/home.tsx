@@ -181,7 +181,7 @@ function FeaturedSection() {
     <section className="py-12 container px-4 md:px-6">
       <div className="flex items-center gap-3 mb-7">
         <Star className="h-6 w-6 text-primary fill-primary" />
-        <h2 className="text-2xl font-bold tracking-tight">أعمال جديدة</h2>
+        <h2 className="text-2xl font-bold tracking-tight">أعمال مختارة</h2>
       </div>
       {loading ? (
         <div className="flex gap-5 overflow-x-auto pb-2">

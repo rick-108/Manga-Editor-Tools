@@ -10,6 +10,7 @@ import commentsRouter from "./comments";
 import imgRouter from "./img";
 import libraryRouter from "./library";
 import progressRouter from "./progress";
+import profileRouter from "./profile";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(commentsRouter);
 router.use(imgRouter);
 router.use(libraryRouter);
 router.use(progressRouter);
+router.use(profileRouter);
 
 export default router;

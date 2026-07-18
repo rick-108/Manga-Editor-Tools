@@ -5,3 +5,4 @@ export * from "./users";
 export * from "./comments";
 export * from "./user_library";
 export * from "./reading_progress";
+export * from "./user_profiles";

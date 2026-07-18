@@ -28,8 +28,8 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
 
   const navItems = [
     { href: "/", label: "الصفحة الرئيسية", icon: Home },
-    { href: "/manga", label: "المكتبة", icon: BookMarked },
-    { href: "/manga?featured=1", label: "أعمال جديدة", icon: Star },
+    { href: "/manga", label: "تصفح الأعمال", icon: BookMarked },
+    { href: "/manga?featured=1", label: "أعمال مختارة", icon: Star },
   ];
 
   return (
