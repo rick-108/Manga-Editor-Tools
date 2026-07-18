@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { ClerkProvider, SignIn, SignUp, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { shadcn } from "@clerk/themes";
+import { arSA } from "@clerk/localizations";
 import { Switch, Route, useLocation, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -148,8 +149,15 @@ function ClerkProviderWithRoutes() {
       signInUrl={`${basePath}/sign-in`}
       signUpUrl={`${basePath}/sign-up`}
       localization={{
-        signIn: { start: { title: "مرحباً بعودتك", subtitle: "سجّل دخولك للمتابعة" } },
-        signUp: { start: { title: "إنشاء حساب جديد", subtitle: "انضم إلى مجتمع RTN مانغا" } },
+        ...arSA,
+        signIn: {
+          ...(arSA.signIn ?? {}),
+          start: { title: "مرحباً بعودتك", subtitle: "سجّل دخولك للمتابعة" },
+        },
+        signUp: {
+          ...(arSA.signUp ?? {}),
+          start: { title: "إنشاء حساب جديد", subtitle: "انضم إلى مجتمع RTN مانغا" },
+        },
       }}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
