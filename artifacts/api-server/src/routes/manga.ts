@@ -1,5 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, ilike, desc, sql, and } from "drizzle-orm";
+import multer from "multer";
+import path from "path";
 import { db, mangaTable, chaptersTable } from "@workspace/db";
 import {
   ListMangaQueryParams,
@@ -7,6 +9,22 @@ import {
   UpdateMangaBody,
 } from "@workspace/api-zod";
 import { requirePublisher } from "../middlewares/publisher";
+import { storeUploadedFile, uploadsDir } from "../lib/storage";
+
+const coverUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname) || ".jpg";
+      cb(null, `cover_${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("يُقبل فقط ملفات الصور"));
+  },
+});
 
 const router: IRouter = Router();
 
@@ -198,6 +216,38 @@ router.patch("/manga/:id", requirePublisher, async (req, res): Promise<void> => 
 
   res.json({ ...updated, chapterCount: Number(cc?.count ?? 0) });
 });
+
+// POST /manga/:id/cover — upload cover image via Telegram
+router.post(
+  "/manga/:id/cover",
+  requirePublisher,
+  coverUpload.single("cover"),
+  async (req, res): Promise<void> => {
+    const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const id = parseInt(raw, 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+    const file = req.file as Express.Multer.File | undefined;
+    if (!file) { res.status(400).json({ error: "لم يتم إرسال ملف" }); return; }
+
+    let coverImage: string;
+    try {
+      coverImage = await storeUploadedFile(file.path, file.originalname || file.filename);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message ?? "فشل رفع الصورة" });
+      return;
+    }
+
+    const [updated] = await db
+      .update(mangaTable)
+      .set({ coverImage })
+      .where(eq(mangaTable.id, id))
+      .returning();
+
+    if (!updated) { res.status(404).json({ error: "Manga not found" }); return; }
+    res.json({ coverImage });
+  }
+);
 
 router.delete("/manga/:id", requirePublisher, async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

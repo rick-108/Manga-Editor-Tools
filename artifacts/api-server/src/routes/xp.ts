@@ -5,8 +5,7 @@ import { awardXp } from "../lib/xp";
 const router: IRouter = Router();
 
 // POST /xp/chapter-complete/:mangaId/:chapterId
-// Awards 20 XP when the user finishes reading a chapter (reaches last page).
-// The unique constraint in xp_events prevents duplicate awards.
+// Returns { awarded, currentXp, level }
 router.post(
   "/xp/chapter-complete/:mangaId/:chapterId",
   requireUser,
@@ -16,8 +15,8 @@ router.post(
       res.status(400).json({ error: "Invalid chapterId" });
       return;
     }
-    await awardXp(req.userId, "chapter", chapterId, 20);
-    res.json({ ok: true });
+    const result = await awardXp(req.userId, "chapter", chapterId, 20);
+    res.json(result);
   }
 );
 

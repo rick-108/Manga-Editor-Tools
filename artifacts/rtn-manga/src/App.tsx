@@ -10,6 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/use-auth";
 import { Layout } from "@/components/layout";
 import { UserProfileProvider } from "@/contexts/user-profile-context";
+import { XpToastProvider } from "@/contexts/xp-toast-context";
 
 import Home from "@/pages/home";
 import MangaList from "@/pages/manga-list";
@@ -167,9 +168,11 @@ function ClerkProviderWithRoutes() {
         <TooltipProvider>
           <AuthProvider>
             <UserProfileProvider>
-              <ClerkQueryCacheInvalidator />
-              <Router />
-              <Toaster />
+              <XpToastProvider>
+                <ClerkQueryCacheInvalidator />
+                <Router />
+                <Toaster />
+              </XpToastProvider>
             </UserProfileProvider>
           </AuthProvider>
         </TooltipProvider>

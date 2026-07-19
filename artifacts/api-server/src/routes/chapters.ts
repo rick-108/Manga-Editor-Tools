@@ -82,6 +82,45 @@ router.get("/manga/:mangaId/chapters/:chapterId", async (req, res): Promise<void
   });
 });
 
+// PATCH /manga/:mangaId/chapters/:chapterId — edit chapter title/number
+router.patch("/manga/:mangaId/chapters/:chapterId", requirePublisher, async (req, res): Promise<void> => {
+  const rawMangaId = Array.isArray(req.params.mangaId) ? req.params.mangaId[0] : req.params.mangaId;
+  const rawChapterId = Array.isArray(req.params.chapterId) ? req.params.chapterId[0] : req.params.chapterId;
+  const mangaId = parseInt(rawMangaId, 10);
+  const chapterId = parseInt(rawChapterId, 10);
+
+  if (isNaN(mangaId) || isNaN(chapterId)) { res.status(400).json({ error: "Invalid parameters" }); return; }
+
+  const { title, number } = req.body ?? {};
+  const updateData: Partial<{ title: string | null; number: number }> = {};
+  if (title !== undefined) updateData.title = typeof title === "string" ? (title.trim() || null) : null;
+  if (number !== undefined) {
+    const n = parseInt(String(number), 10);
+    if (!isNaN(n) && n > 0) updateData.number = n;
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    res.status(400).json({ error: "No valid fields to update" });
+    return;
+  }
+
+  const [updated] = await db
+    .update(chaptersTable)
+    .set(updateData)
+    .where(and(eq(chaptersTable.id, chapterId), eq(chaptersTable.mangaId, mangaId)))
+    .returning();
+
+  if (!updated) { res.status(404).json({ error: "Chapter not found" }); return; }
+
+  const [pc] = await db.select({ count: sql<number>`count(*)` }).from(pagesTable).where(eq(pagesTable.chapterId, chapterId));
+  res.json({
+    ...updated,
+    pageCount: Number(pc?.count ?? 0),
+    createdAt: updated.createdAt.toISOString(),
+    publishedAt: updated.publishedAt?.toISOString() ?? null,
+  });
+});
+
 router.delete("/manga/:mangaId/chapters/:chapterId", requirePublisher, async (req, res): Promise<void> => {
   const rawMangaId = Array.isArray(req.params.mangaId) ? req.params.mangaId[0] : req.params.mangaId;
   const rawChapterId = Array.isArray(req.params.chapterId) ? req.params.chapterId[0] : req.params.chapterId;

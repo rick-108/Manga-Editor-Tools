@@ -40,7 +40,6 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
   const parsed = AddMangaCommentBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  // Reject empty content (extra guard on top of Zod)
   if (!parsed.data.content.trim()) {
     res.status(400).json({ error: "التعليق لا يمكن أن يكون فارغاً" });
     return;
@@ -51,8 +50,8 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
     .values({ mangaId, userId: req.userId, content: parsed.data.content })
     .returning();
 
-  // Award 10 XP for the new comment (once per comment via unique constraint)
-  awardXp(req.userId, "comment", comment.id, 10).catch(() => {});
+  // Award 10 XP and return result for real-time update
+  const xp = await awardXp(req.userId, "comment", comment.id, 10);
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.userId));
 
@@ -60,6 +59,9 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
     ...comment,
     createdAt: comment.createdAt.toISOString(),
     user: user ? { id: user.id, username: user.username, email: user.email, avatar: user.avatar, createdAt: user.createdAt.toISOString() } : null,
+    xpAwarded: xp.awarded,
+    xpCurrentXp: xp.currentXp,
+    xpLevel: xp.level,
   });
 });
 

@@ -11,11 +11,13 @@ export type DbProfile = {
 type UserProfileContextType = {
   dbProfile: DbProfile | null;
   refreshProfile: () => void;
+  updateXp: (currentXp: number, level: number) => void;
 };
 
 const UserProfileContext = createContext<UserProfileContextType>({
   dbProfile: null,
   refreshProfile: () => {},
+  updateXp: () => {},
 });
 
 export function UserProfileProvider({ children }: { children: ReactNode }) {
@@ -39,13 +41,19 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [user]);
 
+  const updateXp = useCallback((currentXp: number, level: number) => {
+    setDbProfile((prev) =>
+      prev ? { ...prev, currentXp, level } : { displayName: null, avatarUrl: null, currentXp, level }
+    );
+  }, []);
+
   useEffect(() => {
     setDbProfile(null);
     fetchProfile();
   }, [user?.id, fetchProfile]);
 
   return (
-    <UserProfileContext.Provider value={{ dbProfile, refreshProfile: fetchProfile }}>
+    <UserProfileContext.Provider value={{ dbProfile, refreshProfile: fetchProfile, updateXp }}>
       {children}
     </UserProfileContext.Provider>
   );
