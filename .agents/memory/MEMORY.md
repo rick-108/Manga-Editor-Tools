@@ -1,2 +1,3 @@
 - [Clerk Setup - RTN Manga](clerk-rtn-manga.md) — Replit-managed Clerk (not_configured → managed); uses Show not SignedIn/SignedOut; cookie-based on web.
 - [DB user_id columns](db-userid-text.md) — user_library and reading_progress use TEXT for user_id (Clerk string IDs), not INTEGER.
+- [Drizzle DB Config](drizzle-db-config.md) — drizzle.config.ts must use NEON_DATABASE_URL (fixed); executeSql hits local DB only; manual Neon migrations via Node.js+pg script.

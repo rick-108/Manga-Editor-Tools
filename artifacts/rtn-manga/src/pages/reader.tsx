@@ -31,7 +31,7 @@ export default function Reader() {
   const { isSignedIn } = useClerkAuth();
   const { publisherToken } = useAuth();
   const { showXpToast } = useXpToast();
-  const { updateXp } = useUserProfile();
+  const { updateXp, incrementViewedChapters } = useUserProfile();
   const queryClient = useQueryClient();
 
   const { data: chapter, isLoading: chapterLoading } = useGetChapter(id, chapterId);
@@ -112,9 +112,12 @@ export default function Reader() {
     return () => { observerRef.current?.disconnect(); };
   }, [chapterId]);
 
-  // ── Award XP on chapter completion ─────────────────────────────────────────
+  // ── Award XP + increment viewed chapters on completion ─────────────────────
   const awardChapterXp = useCallback(async () => {
-    if (!isSignedIn || !lastPageSeen) return;
+    if (!isSignedIn) return;
+    // Always count the chapter as viewed when navigating forward/finishing
+    incrementViewedChapters();
+    if (!lastPageSeen) return;
     try {
       const r = await fetch(`/api/xp/chapter-complete/${id}/${chapterId}`, { method: "POST" });
       const data = await r.json();
@@ -123,7 +126,7 @@ export default function Reader() {
         updateXp(data.currentXp, data.level);
       }
     } catch {}
-  }, [isSignedIn, lastPageSeen, id, chapterId, showXpToast, updateXp]);
+  }, [isSignedIn, lastPageSeen, id, chapterId, showXpToast, updateXp, incrementViewedChapters]);
 
   // ── Immersive mode ──────────────────────────────────────────────────────────
   const [barsVisible, setBarsVisible] = useState(true);

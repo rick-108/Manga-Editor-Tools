@@ -104,4 +104,30 @@ router.post(
   },
 );
 
+// POST /profile/viewed-chapter — increment viewed chapters counter (non-resettable)
+router.post("/profile/viewed-chapter", requireUser, async (req: any, res): Promise<void> => {
+  const [existing] = await db
+    .select()
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.userId, req.userId));
+
+  if (existing) {
+    const [updated] = await db
+      .update(userProfilesTable)
+      .set({
+        viewedChaptersCount: existing.viewedChaptersCount + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(userProfilesTable.userId, req.userId))
+      .returning();
+    res.json({ viewedChaptersCount: updated.viewedChaptersCount });
+  } else {
+    const [inserted] = await db
+      .insert(userProfilesTable)
+      .values({ userId: req.userId, viewedChaptersCount: 1 })
+      .returning();
+    res.json({ viewedChaptersCount: inserted.viewedChaptersCount });
+  }
+});
+
 export default router;

@@ -4,6 +4,7 @@ import { useUser } from "@clerk/react";
 import { useAuth } from "@/hooks/use-auth";
 import { useXpToast } from "@/contexts/xp-toast-context";
 import { useUserProfile } from "@/contexts/user-profile-context";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,6 +45,7 @@ export default function MangaDetail() {
   const { publisherToken } = useAuth();
   const { showXpToast } = useXpToast();
   const { updateXp } = useUserProfile();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, setLocation] = useLocation();
 
@@ -101,12 +103,20 @@ export default function MangaDetail() {
         onSuccess: (data: any) => {
           setCommentContent("");
           queryClient.invalidateQueries({ queryKey: getGetMangaCommentsQueryKey(id) });
+          toast({ title: "تم إرسال التعليق ✓", description: "ظهر تعليقك في القائمة." });
           // Real-time XP update
           if (data?.xpAwarded) {
             showXpToast(10);
             updateXp(data.xpCurrentXp, data.xpLevel);
           }
-        }
+        },
+        onError: (err: any) => {
+          const msg =
+            err?.response?.data?.error ||
+            err?.message ||
+            "حدث خطأ غير متوقع، حاول مجدداً.";
+          toast({ title: "فشل إرسال التعليق", description: msg, variant: "destructive" });
+        },
       }
     );
   };
@@ -328,8 +338,31 @@ export default function MangaDetail() {
             <h2 className="text-2xl font-bold border-b border-border/50 pb-4">التعليقات</h2>
             {user ? (
               <div className="space-y-3 bg-secondary/20 p-4 rounded-xl border border-border/50">
-                <Textarea placeholder="أضف تعليقاً..." value={commentContent} onChange={(e) => setCommentContent(e.target.value)} className="bg-background resize-none h-24" />
-                <Button onClick={handleAddComment} disabled={!commentContent.trim() || addComment.isPending} className="w-full">إرسال التعليق</Button>
+                <Textarea
+                  placeholder="أضف تعليقاً..."
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleAddComment(); }}
+                  className="bg-background resize-none h-24"
+                  disabled={addComment.isPending}
+                />
+                {addComment.isError && (
+                  <p className="text-xs text-destructive">
+                    {(addComment.error as any)?.response?.data?.error || "فشل إرسال التعليق. حاول مجدداً."}
+                  </p>
+                )}
+                <Button
+                  onClick={handleAddComment}
+                  disabled={!commentContent.trim() || addComment.isPending}
+                  className="w-full"
+                >
+                  {addComment.isPending ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      جارٍ الإرسال...
+                    </span>
+                  ) : "إرسال التعليق"}
+                </Button>
               </div>
             ) : (
               <div className="p-4 rounded-xl border border-border/50 bg-secondary/20 text-center">

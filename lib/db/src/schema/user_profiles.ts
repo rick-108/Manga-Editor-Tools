@@ -7,6 +7,7 @@ export const userProfilesTable = pgTable("user_profiles", {
   avatarUrl: text("avatar_url"),
   currentXp: integer("current_xp").notNull().default(0),
   level: integer("level").notNull().default(1),
+  viewedChaptersCount: integer("viewed_chapters_count").notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

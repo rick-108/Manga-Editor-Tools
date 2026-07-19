@@ -6,18 +6,21 @@ export type DbProfile = {
   avatarUrl: string | null;
   currentXp: number;
   level: number;
+  viewedChaptersCount: number;
 };
 
 type UserProfileContextType = {
   dbProfile: DbProfile | null;
   refreshProfile: () => void;
   updateXp: (currentXp: number, level: number) => void;
+  incrementViewedChapters: () => void;
 };
 
 const UserProfileContext = createContext<UserProfileContextType>({
   dbProfile: null,
   refreshProfile: () => {},
   updateXp: () => {},
+  incrementViewedChapters: () => {},
 });
 
 export function UserProfileProvider({ children }: { children: ReactNode }) {
@@ -35,6 +38,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
             avatarUrl: d.avatarUrl ?? null,
             currentXp: d.currentXp ?? 0,
             level: d.level ?? 1,
+            viewedChaptersCount: d.viewedChaptersCount ?? 0,
           });
         }
       })
@@ -43,9 +47,23 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
 
   const updateXp = useCallback((currentXp: number, level: number) => {
     setDbProfile((prev) =>
-      prev ? { ...prev, currentXp, level } : { displayName: null, avatarUrl: null, currentXp, level }
+      prev
+        ? { ...prev, currentXp, level }
+        : { displayName: null, avatarUrl: null, currentXp, level, viewedChaptersCount: 0 }
     );
   }, []);
+
+  const incrementViewedChapters = useCallback(() => {
+    if (!user) return;
+    // Optimistic update
+    setDbProfile((prev) =>
+      prev
+        ? { ...prev, viewedChaptersCount: prev.viewedChaptersCount + 1 }
+        : { displayName: null, avatarUrl: null, currentXp: 0, level: 1, viewedChaptersCount: 1 }
+    );
+    // Persist to server
+    fetch("/api/profile/viewed-chapter", { method: "POST" }).catch(() => {});
+  }, [user]);
 
   useEffect(() => {
     setDbProfile(null);
@@ -53,7 +71,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
   }, [user?.id, fetchProfile]);
 
   return (
-    <UserProfileContext.Provider value={{ dbProfile, refreshProfile: fetchProfile, updateXp }}>
+    <UserProfileContext.Provider value={{ dbProfile, refreshProfile: fetchProfile, updateXp, incrementViewedChapters }}>
       {children}
     </UserProfileContext.Provider>
   );

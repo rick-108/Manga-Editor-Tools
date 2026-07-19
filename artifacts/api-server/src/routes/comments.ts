@@ -13,19 +13,24 @@ router.get("/comments/manga/:mangaId", async (req, res): Promise<void> => {
   const mangaId = parseInt(rawMangaId, 10);
   if (isNaN(mangaId)) { res.status(400).json({ error: "Invalid mangaId" }); return; }
 
-  const comments = await db
-    .select()
-    .from(commentsTable)
-    .where(eq(commentsTable.mangaId, mangaId))
-    .orderBy(desc(commentsTable.createdAt));
+  try {
+    const comments = await db
+      .select()
+      .from(commentsTable)
+      .where(eq(commentsTable.mangaId, mangaId))
+      .orderBy(desc(commentsTable.createdAt));
 
-  const result = comments.map((c) => ({
-    ...c,
-    createdAt: c.createdAt.toISOString(),
-    user: { username: c.username ?? "مستخدم" },
-  }));
+    const result = comments.map((c) => ({
+      ...c,
+      createdAt: c.createdAt.toISOString(),
+      user: { username: c.username ?? "مستخدم" },
+    }));
 
-  res.json(result);
+    res.json(result);
+  } catch (err: any) {
+    console.error("[comments GET] DB error:", err?.message, err?.cause?.message ?? "");
+    res.status(500).json({ error: "فشل جلب التعليقات" });
+  }
 });
 
 // POST /comments/manga/:mangaId — requires Clerk session

@@ -6,7 +6,7 @@ import { useLocation, Link } from "wouter";
 import { format } from "date-fns";
 import {
   LogOut, User as UserIcon, History, BookMarked,
-  BookOpen, Camera, Check, Pencil, X, Zap,
+  BookOpen, Camera, Check, Pencil, X, Zap, Eye,
 } from "lucide-react";
 import { useEffect, useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -133,6 +133,7 @@ export default function Profile() {
   const level = dbProfile?.level ?? 1;
   const xpInLevel = currentXp % 100;
   const xpProgress = xpInLevel; // out of 100
+  const viewedChaptersCount = dbProfile?.viewedChaptersCount ?? 0;
 
   return (
     <div className="container max-w-4xl mx-auto py-12 px-4 space-y-10">
@@ -255,6 +256,31 @@ export default function Profile() {
           <p className="text-xs text-muted-foreground/60 text-left">
             إجمالي النقاط: {currentXp} XP
           </p>
+        </div>
+
+        {/* ── Stats row ──────────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          {/* XP total */}
+          <div className="flex items-center gap-3 bg-secondary/40 rounded-xl px-4 py-3 border border-border/40">
+            <div className="w-9 h-9 rounded-lg bg-yellow-400/15 flex items-center justify-center shrink-0">
+              <Zap className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-bold leading-none">{currentXp.toLocaleString("ar-EG")}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">إجمالي XP</p>
+            </div>
+          </div>
+
+          {/* Viewed chapters */}
+          <div className="flex items-center gap-3 bg-secondary/40 rounded-xl px-4 py-3 border border-border/40">
+            <div className="w-9 h-9 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
+              <Eye className="w-4 h-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-lg font-bold leading-none">{viewedChaptersCount.toLocaleString("ar-EG")}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">فصول تمت قراءتها</p>
+            </div>
+          </div>
         </div>
 
         {/* Upload hint */}
