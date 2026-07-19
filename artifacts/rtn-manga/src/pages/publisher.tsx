@@ -718,8 +718,8 @@ function BulkChapterUploader({ token }: { token: string }) {
           const r = await fetch(`/api/remote/job/${jobId}`, { headers: { Authorization: `Bearer ${token}` } });
           if (!r.ok) return;
           const d = await r.json();
-          if ((d.status === "downloading" || d.status === "fetching") && d.total > 0) {
-            patchLog(logId, { text: `📥 الفصل ${chap}: ${d.downloaded}/${d.total} صفحة...` });
+          if ((d.status === "storing" || d.status === "fetching") && d.total > 0) {
+            patchLog(logId, { text: `🔗 الفصل ${chap}: ${d.downloaded}/${d.total} رابط...` });
           }
           if (d.status === "done")  { clearInterval(iv); resolve({ downloaded: d.downloaded, failedCount: d.failedCount ?? 0 }); }
           if (d.status === "error") { clearInterval(iv); resolve({ downloaded: 0, failedCount: 0, error: d.error ?? "خطأ غير معروف" }); }
@@ -753,7 +753,7 @@ function BulkChapterUploader({ token }: { token: string }) {
         break;
       }
 
-      const url    = baseUrl.replace(/\{chapter\}/gi, String(chap));
+      const url    = baseUrl.replace(/(\d+)(?=\D*$)/, String(chap));
       const logId  = appendLog({ status: "running", text: `⏳ الفصل ${chap}: جاري الاتصال بالرابط...` });
       const chapMs = Math.max(1000, parseInt(delaySeconds) * 1000);
 
@@ -826,8 +826,8 @@ function BulkChapterUploader({ token }: { token: string }) {
     <div className="space-y-6">
       {/* Info banner */}
       <div className="p-4 bg-blue-950/20 border border-blue-800/30 rounded-xl text-sm text-blue-300 leading-relaxed space-y-1">
-        <p><strong>الرفع الجماعي التلقائي:</strong> أدخل رابطاً قالبياً يحتوي على <code className="bg-blue-900/50 px-1.5 py-0.5 rounded font-mono">{"{chapter}"}</code> بدلاً من رقم الفصل — سيستبدله النظام بكل رقم تلقائياً.</p>
-        <p className="text-blue-400/70 text-xs">مثال: <code className="font-mono">https://site.com/manga/title/chapter-{"{chapter}"}</code></p>
+        <p><strong>الرفع الجماعي التلقائي:</strong> الصق رابط الفصل الأول كما هو — سيقوم النظام بزيادة الرقم الأخير في الرابط تلقائياً للانتقال بين الفصول.</p>
+        <p className="text-blue-400/70 text-xs">مثال: إذا أدخلت <code className="font-mono">https://site.com/series/ECD/1</code> سيسحب الفصول 1، 2، 3… بتغيير الرقم الأخير فقط.</p>
       </div>
 
       {/* Form */}
@@ -845,13 +845,19 @@ function BulkChapterUploader({ token }: { token: string }) {
 
         {/* URL template */}
         <div className="space-y-2">
-          <Label>رابط الفصل القالبي *</Label>
+          <Label>رابط الفصل الأول *</Label>
           <Input
             type="url"
             required
             value={baseUrl}
-            onChange={e => setBaseUrl(e.target.value)}
-            placeholder={`https://site.com/manga/name/chapter-{chapter}`}
+            onChange={e => {
+              const val = e.target.value;
+              setBaseUrl(val);
+              // استخراج آخر رقم في الرابط وتعيينه كفصل بداية تلقائياً
+              const m = val.match(/(\d+)\D*$/);
+              if (m) setStartChap(m[1]);
+            }}
+            placeholder="https://site.com/series/ECD/1"
             dir="ltr"
             className="font-mono text-sm"
             disabled={running}
