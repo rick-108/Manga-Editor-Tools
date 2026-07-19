@@ -343,7 +343,7 @@ async function fetchPageUrls(url: string): Promise<{
 // Order is guaranteed by using the original array index as the pageNumber offset.
 // ─────────────────────────────────────────────
 
-const UPLOAD_CONCURRENCY = 5;
+const UPLOAD_CONCURRENCY = 8;
 
 async function runDownloadJob(job: ImportJob, pageUrls: string[], startPageNumber: number) {
   job.status = "downloading";

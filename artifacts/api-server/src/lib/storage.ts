@@ -109,25 +109,62 @@ export async function storeUploadedFile(
 
 /**
  * تنزيل صورة من رابط خارجي ثم رفعها إلى Telegram.
- * يُستخدم في مسار الاستيراد البعيد (remote import).
- * يرمي خطأً صريحاً إذا كانت Secrets مفقودة — لا fallback.
+ * — 3 محاولات تلقائية مع exponential backoff (0 → 1s → 2s)
+ * — فحص حجم الصورة: أي ملف أصغر من 1KB يُعتبر فاشلاً
+ * — headers متخصصة للصور (sec-fetch-dest: image)
  */
 export async function storeRemoteImage(
   imageUrl: string,
   filename: string,
-  referer: string
+  referer: string,
+  maxRetries = 3,
 ): Promise<string> {
-  const imgRes = await axios.get<ArrayBuffer>(imageUrl, {
-    responseType: "arraybuffer",
-    timeout: 60_000,
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      "Referer": referer || new URL(imageUrl).origin,
-      "Accept": "image/*,*/*",
-    },
-    maxRedirects: 10,
-  });
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-  const buffer = Buffer.from(imgRes.data);
-  return await uploadToTelegram(buffer, filename);
+  let origin = "";
+  try { origin = new URL(referer).origin; } catch { try { origin = new URL(imageUrl).origin; } catch { /* */ } }
+
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": referer || origin + "/",
+    "Origin": origin,
+    "sec-fetch-dest": "image",
+    "sec-fetch-mode": "no-cors",
+    "sec-fetch-site": "cross-site",
+    "Connection": "keep-alive",
+  };
+
+  let lastErr: unknown = new Error("لم تبدأ أي محاولة");
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // تأخير تدريجي: المحاولة الأولى فوراً، ثم 1s، ثم 2s
+    if (attempt > 0) await sleep(1000 * attempt);
+
+    try {
+      const imgRes = await axios.get<ArrayBuffer>(imageUrl, {
+        responseType: "arraybuffer",
+        timeout: 60_000,
+        headers,
+        maxRedirects: 10,
+        validateStatus: (s) => s < 400,
+      });
+
+      const buffer = Buffer.from(imgRes.data);
+
+      // فحص النزاهة — الملفات أصغر من 1KB عادةً صفحات خطأ أو placeholders
+      if (buffer.length < 1024) {
+        lastErr = new Error(`الصورة فارغة أو صغيرة جداً (${buffer.length} bytes) — محاولة ${attempt + 1}/${maxRetries}`);
+        continue;
+      }
+
+      return await uploadToTelegram(buffer, filename);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  throw lastErr;
 }
