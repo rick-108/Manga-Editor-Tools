@@ -18,6 +18,7 @@ import MangaDetail from "@/pages/manga-detail";
 import Reader from "@/pages/reader";
 import Publisher from "@/pages/publisher";
 import Profile from "@/pages/profile";
+import Library from "@/pages/library";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -134,6 +135,7 @@ function Router() {
       <Route path="/manga/:id/chapter/:chapterId" component={Reader} />
       <Route path="/publish" component={() => <Layout><Publisher /></Layout>} />
       <Route path="/profile" component={() => <Layout><Profile /></Layout>} />
+      <Route path="/library" component={() => <Layout><Library /></Layout>} />
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
       <Route component={() => <Layout><NotFound /></Layout>} />

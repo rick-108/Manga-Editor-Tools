@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, and } from "drizzle-orm";
-import { db, commentsTable, usersTable } from "@workspace/db";
+import { db, commentsTable, userProfilesTable } from "@workspace/db";
 import { AddMangaCommentBody } from "@workspace/api-zod";
 import { requireUser } from "./auth";
 import { awardXp } from "../lib/xp";
 
 const router: IRouter = Router();
 
+// GET /comments/manga/:mangaId
 router.get("/comments/manga/:mangaId", async (req, res): Promise<void> => {
   const rawMangaId = Array.isArray(req.params.mangaId) ? req.params.mangaId[0] : req.params.mangaId;
   const mangaId = parseInt(rawMangaId, 10);
@@ -18,20 +19,16 @@ router.get("/comments/manga/:mangaId", async (req, res): Promise<void> => {
     .where(eq(commentsTable.mangaId, mangaId))
     .orderBy(desc(commentsTable.createdAt));
 
-  const result = await Promise.all(
-    comments.map(async (c) => {
-      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, c.userId));
-      return {
-        ...c,
-        createdAt: c.createdAt.toISOString(),
-        user: user ? { id: user.id, username: user.username, email: user.email, avatar: user.avatar, createdAt: user.createdAt.toISOString() } : null,
-      };
-    })
-  );
+  const result = comments.map((c) => ({
+    ...c,
+    createdAt: c.createdAt.toISOString(),
+    user: { username: c.username ?? "مستخدم" },
+  }));
 
   res.json(result);
 });
 
+// POST /comments/manga/:mangaId — requires Clerk session
 router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Promise<void> => {
   const rawMangaId = Array.isArray(req.params.mangaId) ? req.params.mangaId[0] : req.params.mangaId;
   const mangaId = parseInt(rawMangaId, 10);
@@ -40,31 +37,38 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
   const parsed = AddMangaCommentBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  if (!parsed.data.content.trim()) {
+  const trimmedContent = parsed.data.content.trim();
+  if (!trimmedContent) {
     res.status(400).json({ error: "التعليق لا يمكن أن يكون فارغاً" });
     return;
   }
 
+  // Fetch display name from user_profiles for this Clerk user
+  const [profile] = await db
+    .select()
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.userId, req.userId));
+  const username = profile?.displayName ?? null;
+
   const [comment] = await db
     .insert(commentsTable)
-    .values({ mangaId, userId: req.userId, content: parsed.data.content })
+    .values({ mangaId, userId: req.userId, username, content: trimmedContent })
     .returning();
 
-  // Award 10 XP and return result for real-time update
+  // Award 10 XP — returns whether it was a new event and the updated totals
   const xp = await awardXp(req.userId, "comment", comment.id, 10);
-
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.userId));
 
   res.status(201).json({
     ...comment,
     createdAt: comment.createdAt.toISOString(),
-    user: user ? { id: user.id, username: user.username, email: user.email, avatar: user.avatar, createdAt: user.createdAt.toISOString() } : null,
+    user: { username: comment.username ?? "مستخدم" },
     xpAwarded: xp.awarded,
     xpCurrentXp: xp.currentXp,
     xpLevel: xp.level,
   });
 });
 
+// DELETE /comments/:commentId — author only
 router.delete("/comments/:commentId", requireUser, async (req: any, res): Promise<void> => {
   const rawCommentId = Array.isArray(req.params.commentId) ? req.params.commentId[0] : req.params.commentId;
   const commentId = parseInt(rawCommentId, 10);

@@ -118,7 +118,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
 
             <Show when="signed-in">
               <li>
-                <Link href="/profile#library">
+                <Link href="/library">
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-secondary transition-colors cursor-pointer group">
                     <BookOpen className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
                     <span className="font-medium group-hover:text-primary transition-colors">مكتبتي</span>
@@ -126,7 +126,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
                 </Link>
               </li>
               <li>
-                <Link href="/profile#history">
+                <Link href="/profile">
                   <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-secondary transition-colors cursor-pointer group">
                     <History className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
                     <span className="font-medium group-hover:text-primary transition-colors">سجل القراءة</span>
