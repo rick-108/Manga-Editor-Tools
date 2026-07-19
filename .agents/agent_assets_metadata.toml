@@ -8,12 +8,6 @@ type = "unspecified"
 title = "RTN Manga — Source Code"
 
 [[outputs]]
-id = "LhLxaICIDu_DCM8koSqIo"
-uri = "file://rtn-manga-fixed.tar.gz"
-type = "unspecified"
-title = "RTN Manga — بعد الإصلاحات"
-
-[[outputs]]
 id = "4XXMB75NW0Tro1dXs5Oky"
 uri = "file://rtn-manga-bg-jobs.tar.gz"
 type = "unspecified"
