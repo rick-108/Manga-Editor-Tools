@@ -61,6 +61,28 @@ export default function MangaDetail() {
   const [libLoading, setLibLoading] = useState(false);
   const [libChecked, setLibChecked] = useState(false);
 
+  // Comment deletion (publisher only)
+  const [deleteCommentId, setDeleteCommentId] = useState<number | null>(null);
+  const [deletingComment, setDeletingComment] = useState(false);
+
+  const handleDeleteComment = async () => {
+    if (!deleteCommentId || !publisherToken) return;
+    setDeletingComment(true);
+    try {
+      await fetch(`/api/comments/${deleteCommentId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${publisherToken}` },
+      });
+      queryClient.invalidateQueries({ queryKey: getGetMangaCommentsQueryKey(id) });
+      toast({ title: "تم حذف التعليق ✓" });
+    } catch {
+      toast({ title: "فشل حذف التعليق", variant: "destructive" });
+    } finally {
+      setDeletingComment(false);
+      setDeleteCommentId(null);
+    }
+  };
+
   // Publisher modals
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteCode, setDeleteCode] = useState("");
@@ -375,14 +397,33 @@ export default function MangaDetail() {
                 <p className="text-center text-muted-foreground py-8">لا توجد تعليقات بعد.</p>
               ) : comments?.map((comment) => (
                 <div key={comment.id} className="p-4 rounded-xl bg-secondary/30 border border-border/50 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0">
-                      {comment.user?.username?.charAt(0)?.toUpperCase() ?? "؟"}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {(comment.user as any)?.avatar ? (
+                        <img
+                          src={(comment.user as any).avatar}
+                          alt={(comment.user?.username ?? "مستخدم")}
+                          className="w-8 h-8 rounded-full object-cover shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+                          {comment.user?.username?.charAt(0)?.toUpperCase() ?? "؟"}
+                        </div>
+                      )}
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-medium text-sm truncate">{comment.user?.username ?? "مجهول"}</span>
+                        <span className="text-[10px] text-muted-foreground">{format(new Date(comment.createdAt), "yyyy/MM/dd HH:mm")}</span>
+                      </div>
                     </div>
-                    <div className="flex flex-col">
-                      <span className="font-medium text-sm">{comment.user?.username ?? "مجهول"}</span>
-                      <span className="text-[10px] text-muted-foreground">{format(new Date(comment.createdAt), "yyyy/MM/dd HH:mm")}</span>
-                    </div>
+                    {publisherToken && (
+                      <button
+                        onClick={() => setDeleteCommentId(comment.id)}
+                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
+                        title="حذف التعليق"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   <p className="text-sm text-foreground/90 pl-10 pr-2">{comment.content}</p>
                 </div>
@@ -391,6 +432,30 @@ export default function MangaDetail() {
           </div>
         </div>
       </div>
+
+      {/* ── Delete Comment Modal (publisher only) ─────────────────────────── */}
+      {deleteCommentId !== null && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDeleteCommentId(null)}>
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-destructive/15 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-destructive" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg">حذف التعليق</h3>
+                <p className="text-sm text-muted-foreground">هذا الإجراء لا يمكن التراجع عنه</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">هل أنت متأكد من حذف هذا التعليق نهائياً؟</p>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" onClick={() => setDeleteCommentId(null)} disabled={deletingComment}>إلغاء</Button>
+              <Button variant="destructive" onClick={handleDeleteComment} disabled={deletingComment}>
+                {deletingComment ? "جارٍ الحذف..." : "تأكيد الحذف"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete Manga Modal ─────────────────────────────────────────────── */}
       {deleteOpen && (

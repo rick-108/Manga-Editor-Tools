@@ -1,9 +1,13 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db, commentsTable, userProfilesTable } from "@workspace/db";
 import { AddMangaCommentBody } from "@workspace/api-zod";
 import { requireUser } from "./auth";
 import { awardXp } from "../lib/xp";
+import jwt from "jsonwebtoken";
+import { getAuth } from "@clerk/express";
+
+const JWT_SECRET = process.env.SESSION_SECRET ?? "rtn_manga_jwt_secret_fallback";
 
 const router: IRouter = Router();
 
@@ -15,15 +19,31 @@ router.get("/comments/manga/:mangaId", async (req, res): Promise<void> => {
 
   try {
     const comments = await db
-      .select()
+      .select({
+        id: commentsTable.id,
+        mangaId: commentsTable.mangaId,
+        userId: commentsTable.userId,
+        username: commentsTable.username,
+        content: commentsTable.content,
+        createdAt: commentsTable.createdAt,
+        profileDisplayName: userProfilesTable.displayName,
+        avatarUrl: userProfilesTable.avatarUrl,
+      })
       .from(commentsTable)
+      .leftJoin(userProfilesTable, eq(commentsTable.userId, userProfilesTable.userId))
       .where(eq(commentsTable.mangaId, mangaId))
       .orderBy(desc(commentsTable.createdAt));
 
     const result = comments.map((c) => ({
-      ...c,
+      id: c.id,
+      mangaId: c.mangaId,
+      userId: c.userId,
+      content: c.content,
       createdAt: c.createdAt.toISOString(),
-      user: { username: c.username ?? "مستخدم" },
+      user: {
+        username: c.username ?? c.profileDisplayName ?? "مستخدم",
+        avatar: c.avatarUrl ?? null,
+      },
     }));
 
     res.json(result);
@@ -48,12 +68,13 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
     return;
   }
 
-  // Fetch display name from user_profiles for this Clerk user
+  // Fetch display name + avatar from user_profiles for this Clerk user
   const [profile] = await db
     .select()
     .from(userProfilesTable)
     .where(eq(userProfilesTable.userId, req.userId));
   const username = profile?.displayName ?? null;
+  const avatarUrl = profile?.avatarUrl ?? null;
 
   const [comment] = await db
     .insert(commentsTable)
@@ -64,26 +85,55 @@ router.post("/comments/manga/:mangaId", requireUser, async (req: any, res): Prom
   const xp = await awardXp(req.userId, "comment", comment.id, 10);
 
   res.status(201).json({
-    ...comment,
+    id: comment.id,
+    mangaId: comment.mangaId,
+    userId: comment.userId,
+    content: comment.content,
     createdAt: comment.createdAt.toISOString(),
-    user: { username: comment.username ?? "مستخدم" },
+    user: { username: comment.username ?? "مستخدم", avatar: avatarUrl },
     xpAwarded: xp.awarded,
     xpCurrentXp: xp.currentXp,
     xpLevel: xp.level,
   });
 });
 
-// DELETE /comments/:commentId — author only
-router.delete("/comments/:commentId", requireUser, async (req: any, res): Promise<void> => {
+// DELETE /comments/:commentId — author OR publisher
+router.delete("/comments/:commentId", async (req: any, res): Promise<void> => {
   const rawCommentId = Array.isArray(req.params.commentId) ? req.params.commentId[0] : req.params.commentId;
   const commentId = parseInt(rawCommentId, 10);
   if (isNaN(commentId)) { res.status(400).json({ error: "Invalid commentId" }); return; }
 
-  const [comment] = await db.select().from(commentsTable).where(eq(commentsTable.id, commentId));
-  if (!comment) { res.status(404).json({ error: "Comment not found" }); return; }
-  if (comment.userId !== req.userId) { res.status(403).json({ error: "لا يمكنك حذف تعليق شخص آخر" }); return; }
+  // Check if request comes from a publisher (JWT bearer)
+  const authHeader = req.headers.authorization;
+  let isPublisher = false;
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      jwt.verify(authHeader.replace("Bearer ", ""), JWT_SECRET);
+      isPublisher = true;
+    } catch {}
+  }
 
-  await db.delete(commentsTable).where(and(eq(commentsTable.id, commentId), eq(commentsTable.userId, req.userId)));
+  // If not publisher, require Clerk user session
+  let userId: string | null = null;
+  if (!isPublisher) {
+    const auth = getAuth(req);
+    userId = auth?.userId ?? null;
+    if (!userId) {
+      res.status(401).json({ error: "يجب تسجيل الدخول أولاً" });
+      return;
+    }
+  }
+
+  const [comment] = await db.select().from(commentsTable).where(eq(commentsTable.id, commentId));
+  if (!comment) { res.status(404).json({ error: "التعليق غير موجود" }); return; }
+
+  // Non-publisher can only delete their own comments
+  if (!isPublisher && comment.userId !== userId) {
+    res.status(403).json({ error: "لا يمكنك حذف تعليق شخص آخر" });
+    return;
+  }
+
+  await db.delete(commentsTable).where(eq(commentsTable.id, commentId));
   res.sendStatus(204);
 });
 
