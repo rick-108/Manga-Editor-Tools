@@ -76,7 +76,7 @@ export default function MangaDetail() {
     const headers: Record<string, string> = {};
     if (publisherToken) headers["Authorization"] = `Bearer ${publisherToken}`;
     try {
-      const r = await fetch(`/api/comments/${deleteCommentId}`, { method: "DELETE", headers });
+      const r = await fetch(`/api/comments/${deleteCommentId}`, { method: "DELETE", headers, credentials: "include" });
       if (r.ok || r.status === 204) {
         // Instant UI update — no refetch needed
         queryClient.setQueryData(getGetMangaCommentsQueryKey(id), (old: any) =>
@@ -98,9 +98,12 @@ export default function MangaDetail() {
     if (!editingCommentId || !editingContent.trim()) return;
     setSavingEdit(true);
     try {
+      const editHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (publisherToken) editHeaders["Authorization"] = `Bearer ${publisherToken}`;
       const r = await fetch(`/api/comments/${editingCommentId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: editHeaders,
+        credentials: "include",
         body: JSON.stringify({ content: editingContent.trim() }),
       });
       if (r.ok) {

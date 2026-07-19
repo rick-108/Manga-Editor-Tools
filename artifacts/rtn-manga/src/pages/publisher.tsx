@@ -79,6 +79,7 @@ export default function Publisher() {
       <Tabs defaultValue="remote" className="w-full">
         <TabsList className="flex w-full h-auto overflow-x-auto gap-1 justify-start p-1.5 rounded-xl bg-secondary/50 scrollbar-none">
           <TabsTrigger value="remote" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">📥 استيراد بعيد</TabsTrigger>
+          <TabsTrigger value="bulk" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">📦 رفع جماعي</TabsTrigger>
           <TabsTrigger value="add-chapter" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">➕ رفع يدوي</TabsTrigger>
           <TabsTrigger value="pending" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">⏳ الفصول المعلقة</TabsTrigger>
           <TabsTrigger value="create-manga" className="py-2.5 px-4 whitespace-nowrap flex-shrink-0 rounded-lg text-sm">📚 إنشاء مانغا</TabsTrigger>
@@ -88,6 +89,9 @@ export default function Publisher() {
         <div className="mt-6 bg-card border border-border rounded-xl p-6 shadow-sm">
           <TabsContent value="remote">
             <RemoteImportForm token={publisherToken} />
+          </TabsContent>
+          <TabsContent value="bulk">
+            <BulkChapterUploader token={publisherToken} />
           </TabsContent>
           <TabsContent value="add-chapter">
             <AddChapterForm token={publisherToken} />
@@ -654,6 +658,279 @@ function RemoteImportForm({ token }: { token: string }) {
         {submitting ? "⏳ جاري البدء..." : autoPublish ? "⚡ تنزيل ونشر تلقائي" : "📥 تنزيل وإنشاء الفصل"}
       </Button>
     </form>
+  );
+}
+
+// ─── Bulk Chapter Uploader ────────────────────────────────────────────────────
+
+interface BulkLogEntry {
+  id: number;
+  status: "running" | "done" | "error" | "wait" | "info";
+  text: string;
+}
+
+function BulkChapterUploader({ token }: { token: string }) {
+  const { data: mangaList } = useListManga({ limit: 100 });
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Form inputs
+  const [mangaId, setMangaId]         = useState("");
+  const [baseUrl, setBaseUrl]         = useState("");
+  const [startChap, setStartChap]     = useState("1");
+  const [endChap, setEndChap]         = useState("10");
+  const [delaySeconds, setDelaySeconds] = useState("7");
+  const [autoPublish, setAutoPublish] = useState(false);
+
+  // Run state
+  const [running, setRunning] = useState(false);
+  const [logs, setLogs]       = useState<BulkLogEntry[]>([]);
+  const logRef   = useRef<HTMLDivElement>(null);
+  const stopRef  = useRef(false);
+  const idRef    = useRef(0);
+
+  // Helpers
+  const nextId = () => ++idRef.current;
+
+  const appendLog = (entry: Omit<BulkLogEntry, "id">): number => {
+    const id = nextId();
+    setLogs(prev => [...prev, { ...entry, id }]);
+    requestAnimationFrame(() => {
+      if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    });
+    return id;
+  };
+
+  const patchLog = (id: number, patch: Partial<Omit<BulkLogEntry, "id">>) =>
+    setLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+
+  const removeLog = (id: number) =>
+    setLogs(prev => prev.filter(l => l.id !== id));
+
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+  /** Poll a job until done/error. Updates the log line as pages arrive. */
+  const pollJob = (jobId: string, logId: number, chap: number) =>
+    new Promise<{ downloaded: number; failedCount: number; error?: string }>(resolve => {
+      const iv = setInterval(async () => {
+        if (stopRef.current) { clearInterval(iv); resolve({ downloaded: 0, failedCount: 0, error: "stopped" }); return; }
+        try {
+          const r = await fetch(`/api/remote/job/${jobId}`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!r.ok) return;
+          const d = await r.json();
+          if ((d.status === "downloading" || d.status === "fetching") && d.total > 0) {
+            patchLog(logId, { text: `📥 الفصل ${chap}: ${d.downloaded}/${d.total} صفحة...` });
+          }
+          if (d.status === "done")  { clearInterval(iv); resolve({ downloaded: d.downloaded, failedCount: d.failedCount ?? 0 }); }
+          if (d.status === "error") { clearInterval(iv); resolve({ downloaded: 0, failedCount: 0, error: d.error ?? "خطأ غير معروف" }); }
+        } catch { /* network hiccup */ }
+      }, 2000);
+    });
+
+  const handleStart = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const start = parseInt(startChap);
+    const end   = parseInt(endChap);
+    if (!mangaId || !baseUrl || isNaN(start) || isNaN(end) || start > end) {
+      toast({ variant: "destructive", title: "تحقق من المدخلات" });
+      return;
+    }
+
+    setRunning(true);
+    stopRef.current = false;
+    idRef.current   = 0;
+    setLogs([]);
+
+    const totalChapters = end - start + 1;
+    appendLog({ status: "info", text: `🚀 بدء الرفع الجماعي: الفصول ${start} → ${end} (${totalChapters} فصل) — تأخير ${delaySeconds}ث بين كل فصل` });
+
+    let successCount = 0;
+    let errorCount   = 0;
+
+    for (let chap = start; chap <= end; chap++) {
+      if (stopRef.current) {
+        appendLog({ status: "error", text: "⛔ تم الإيقاف من قِبَل الناشر." });
+        break;
+      }
+
+      const url    = baseUrl.replace(/\{chapter\}/gi, String(chap));
+      const logId  = appendLog({ status: "running", text: `⏳ الفصل ${chap}: جاري الاتصال بالرابط...` });
+      const chapMs = Math.max(1000, parseInt(delaySeconds) * 1000);
+
+      try {
+        const res = await fetch("/api/remote/start-import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ url, mangaId: Number(mangaId), chapterNumber: chap, autoPublish }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          patchLog(logId, { status: "error", text: `❌ الفصل ${chap}: فشل — ${errData.error ?? res.statusText}` });
+          errorCount++;
+        } else {
+          const { jobId } = await res.json();
+          patchLog(logId, { text: `📡 الفصل ${chap}: جاري التحليل والتنزيل...` });
+          const result = await pollJob(jobId, logId, chap);
+
+          if (result.error && result.error !== "stopped") {
+            patchLog(logId, { status: "error", text: `❌ الفصل ${chap}: فشل — ${result.error}` });
+            errorCount++;
+          } else if (!result.error) {
+            const suffix = result.failedCount > 0 ? ` (⚠️ ${result.failedCount} فشلت)` : "";
+            patchLog(logId, { status: "done", text: `✅ الفصل ${chap}: تم — ${result.downloaded} صفحة${suffix}` });
+            successCount++;
+            queryClient.invalidateQueries({ queryKey: ["/api/publisher/pending-chapters"] });
+          }
+        }
+      } catch (err: any) {
+        patchLog(logId, { status: "error", text: `❌ الفصل ${chap}: خطأ — ${err.message}` });
+        errorCount++;
+      }
+
+      // Delay between chapters (skip after last one)
+      if (chap < end && !stopRef.current) {
+        const waitId = appendLog({ status: "wait", text: `⏱ انتظار ${delaySeconds}ث قبل الفصل ${chap + 1}...` });
+        await sleep(chapMs);
+        removeLog(waitId);
+      }
+    }
+
+    if (!stopRef.current) {
+      appendLog({
+        status: errorCount === 0 ? "done" : successCount > 0 ? "info" : "error",
+        text: `🏁 انتهى الرفع الجماعي — نجح: ${successCount} / فشل: ${errorCount} من أصل ${totalChapters} فصل`,
+      });
+      toast({ title: errorCount === 0 ? "✅ انتهى الرفع بنجاح!" : `انتهى: ${successCount} نجح، ${errorCount} فشل` });
+    }
+
+    setRunning(false);
+  };
+
+  const handleStop = () => { stopRef.current = true; };
+
+  // Colour coding
+  const logClass = (status: BulkLogEntry["status"]) => {
+    if (status === "done")    return "text-green-400";
+    if (status === "error")   return "text-red-400";
+    if (status === "wait")    return "text-yellow-400/70 italic";
+    if (status === "info")    return "text-blue-300 font-semibold";
+    return "text-foreground/80"; // running
+  };
+
+  const chapCount = Math.max(0, parseInt(endChap || "0") - parseInt(startChap || "0") + 1);
+  const successCount = logs.filter(l => l.status === "done").length;
+  const errorCount   = logs.filter(l => l.status === "error").length;
+
+  return (
+    <div className="space-y-6">
+      {/* Info banner */}
+      <div className="p-4 bg-blue-950/20 border border-blue-800/30 rounded-xl text-sm text-blue-300 leading-relaxed space-y-1">
+        <p><strong>الرفع الجماعي التلقائي:</strong> أدخل رابطاً قالبياً يحتوي على <code className="bg-blue-900/50 px-1.5 py-0.5 rounded font-mono">{"{chapter}"}</code> بدلاً من رقم الفصل — سيستبدله النظام بكل رقم تلقائياً.</p>
+        <p className="text-blue-400/70 text-xs">مثال: <code className="font-mono">https://site.com/manga/title/chapter-{"{chapter}"}</code></p>
+      </div>
+
+      {/* Form */}
+      <form onSubmit={handleStart} className="space-y-5">
+        {/* Manga selector */}
+        <div className="space-y-2">
+          <Label>العمل (المانغا) *</Label>
+          <Select value={mangaId} onValueChange={setMangaId} required>
+            <SelectTrigger><SelectValue placeholder="اختر المانغا" /></SelectTrigger>
+            <SelectContent>
+              {mangaList?.data.map(m => <SelectItem key={m.id} value={m.id.toString()}>{m.title}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* URL template */}
+        <div className="space-y-2">
+          <Label>رابط الفصل القالبي *</Label>
+          <Input
+            type="url"
+            required
+            value={baseUrl}
+            onChange={e => setBaseUrl(e.target.value)}
+            placeholder={`https://site.com/manga/name/chapter-{chapter}`}
+            dir="ltr"
+            className="font-mono text-sm"
+            disabled={running}
+          />
+        </div>
+
+        {/* Chapter range + delay */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <Label>فصل البداية *</Label>
+            <Input type="number" min="1" step="1" required value={startChap} onChange={e => setStartChap(e.target.value)} disabled={running} />
+          </div>
+          <div className="space-y-2">
+            <Label>فصل النهاية *</Label>
+            <Input type="number" min="1" step="1" required value={endChap} onChange={e => setEndChap(e.target.value)} disabled={running} />
+          </div>
+          <div className="space-y-2">
+            <Label>تأخير بين الفصول (ث)</Label>
+            <Input type="number" min="1" max="120" value={delaySeconds} onChange={e => setDelaySeconds(e.target.value)} disabled={running} />
+          </div>
+        </div>
+
+        {/* Publish mode */}
+        <label className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors ${autoPublish ? "bg-green-950/25 border-green-700/50" : "bg-secondary/20 border-secondary/40 hover:bg-secondary/30"} ${running ? "opacity-60 pointer-events-none" : ""}`}>
+          <input type="checkbox" className="mt-0.5 w-4 h-4 accent-green-500" checked={autoPublish} onChange={e => setAutoPublish(e.target.checked)} disabled={running} />
+          <div>
+            <p className="font-semibold text-sm">{autoPublish ? "⚡ نشر فوري لكل فصل" : "👁 تحويل للمراجعة اليدوية"}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{autoPublish ? "كل فصل يُنشر تلقائياً فور انتهاء تنزيله" : "الفصول تُضاف كمعلقة وتُراجع يدوياً"}</p>
+          </div>
+        </label>
+
+        {/* Action buttons */}
+        {!running ? (
+          <Button type="submit" className={`w-full h-12 text-base font-semibold ${autoPublish ? "bg-green-600 hover:bg-green-700" : ""}`} disabled={!mangaId || !baseUrl || chapCount <= 0}>
+            🚀 بدء الرفع الجماعي ({chapCount} فصل)
+          </Button>
+        ) : (
+          <div className="flex gap-3">
+            <div className="flex-1 flex items-center gap-3 bg-secondary/20 rounded-xl px-5 border border-border">
+              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />
+              <span className="text-sm">جاري الرفع الجماعي...</span>
+            </div>
+            <Button type="button" variant="destructive" className="px-6" onClick={handleStop}>
+              ⛔ إيقاف
+            </Button>
+          </div>
+        )}
+      </form>
+
+      {/* Log panel */}
+      {logs.length > 0 && (
+        <div className="border border-border rounded-xl overflow-hidden">
+          {/* Log header */}
+          <div className="px-4 py-2.5 bg-secondary/30 border-b border-border flex items-center justify-between gap-4">
+            <span className="text-sm font-semibold">📋 سجل العمليات</span>
+            <div className="flex items-center gap-4 text-xs">
+              {successCount > 0 && <span className="text-green-400 font-mono">{successCount} ✓ نجح</span>}
+              {errorCount   > 0 && <span className="text-red-400 font-mono">{errorCount} ✗ فشل</span>}
+              {running && (
+                <span className="text-muted-foreground">
+                  {successCount + errorCount} / {chapCount}
+                </span>
+              )}
+            </div>
+          </div>
+          {/* Log entries */}
+          <div
+            ref={logRef}
+            className="max-h-80 overflow-y-auto p-4 space-y-1 font-mono text-xs bg-black/30"
+          >
+            {logs.map(entry => (
+              <div key={entry.id} className={`leading-relaxed ${logClass(entry.status)}`}>
+                {entry.text}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
