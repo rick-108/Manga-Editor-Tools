@@ -61,25 +61,68 @@ export default function MangaDetail() {
   const [libLoading, setLibLoading] = useState(false);
   const [libChecked, setLibChecked] = useState(false);
 
-  // Comment deletion (publisher only)
+  // Comment delete
   const [deleteCommentId, setDeleteCommentId] = useState<number | null>(null);
   const [deletingComment, setDeletingComment] = useState(false);
 
+  // Comment inline edit
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   const handleDeleteComment = async () => {
-    if (!deleteCommentId || !publisherToken) return;
+    if (!deleteCommentId) return;
     setDeletingComment(true);
+    const headers: Record<string, string> = {};
+    if (publisherToken) headers["Authorization"] = `Bearer ${publisherToken}`;
     try {
-      await fetch(`/api/comments/${deleteCommentId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${publisherToken}` },
-      });
-      queryClient.invalidateQueries({ queryKey: getGetMangaCommentsQueryKey(id) });
-      toast({ title: "تم حذف التعليق ✓" });
+      const r = await fetch(`/api/comments/${deleteCommentId}`, { method: "DELETE", headers });
+      if (r.ok || r.status === 204) {
+        // Instant UI update — no refetch needed
+        queryClient.setQueryData(getGetMangaCommentsQueryKey(id), (old: any) =>
+          old?.filter((c: any) => c.id !== deleteCommentId) ?? []
+        );
+        toast({ title: "تم حذف التعليق ✓" });
+      } else {
+        toast({ title: "فشل حذف التعليق", variant: "destructive" });
+      }
     } catch {
       toast({ title: "فشل حذف التعليق", variant: "destructive" });
     } finally {
       setDeletingComment(false);
       setDeleteCommentId(null);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingCommentId || !editingContent.trim()) return;
+    setSavingEdit(true);
+    try {
+      const r = await fetch(`/api/comments/${editingCommentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editingContent.trim() }),
+      });
+      if (r.ok) {
+        const updated = await r.json();
+        // Instant UI update
+        queryClient.setQueryData(getGetMangaCommentsQueryKey(id), (old: any) =>
+          old?.map((c: any) =>
+            c.id === editingCommentId
+              ? { ...c, content: updated.content, isEdited: true, updatedAt: updated.updatedAt }
+              : c
+          ) ?? []
+        );
+        setEditingCommentId(null);
+        setEditingContent("");
+        toast({ title: "تم تحديث التعليق ✓" });
+      } else {
+        toast({ title: "فشل تحديث التعليق", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "فشل تحديث التعليق", variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -395,39 +438,97 @@ export default function MangaDetail() {
             <div className="space-y-4 mt-6">
               {commentsLoading ? <Skeleton className="h-24 w-full rounded-lg" /> : comments?.length === 0 ? (
                 <p className="text-center text-muted-foreground py-8">لا توجد تعليقات بعد.</p>
-              ) : comments?.map((comment) => (
-                <div key={comment.id} className="p-4 rounded-xl bg-secondary/30 border border-border/50 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {(comment.user as any)?.avatar ? (
-                        <img
-                          src={(comment.user as any).avatar}
-                          alt={(comment.user?.username ?? "مستخدم")}
-                          className="w-8 h-8 rounded-full object-cover shrink-0"
-                        />
-                      ) : (
-                        <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0">
-                          {comment.user?.username?.charAt(0)?.toUpperCase() ?? "؟"}
+              ) : comments?.map((comment) => {
+                const c = comment as any;
+                const isOwner = !!user && user.id === c.userId;
+                const canAct = isOwner || !!publisherToken;
+                const isEditingThis = editingCommentId === comment.id;
+
+                return (
+                  <div key={comment.id} className="p-4 rounded-xl bg-secondary/30 border border-border/50 space-y-2">
+                    {/* Header row */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        {c.user?.avatar ? (
+                          <img src={c.user.avatar} alt={c.user?.username ?? "مستخدم"} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs shrink-0">
+                            {c.user?.username?.charAt(0)?.toUpperCase() ?? "؟"}
+                          </div>
+                        )}
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-medium text-sm truncate">{c.user?.username ?? "مجهول"}</span>
+                          <span className="text-[10px] text-muted-foreground">{format(new Date(comment.createdAt), "yyyy/MM/dd HH:mm")}</span>
+                        </div>
+                      </div>
+                      {canAct && !isEditingThis && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Edit — owner only (publisher can delete but not impersonate) */}
+                          {isOwner && (
+                            <button
+                              onClick={() => { setEditingCommentId(comment.id); setEditingContent(comment.content); }}
+                              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+                              title="تعديل التعليق"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setDeleteCommentId(comment.id)}
+                            className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
+                            title="حذف التعليق"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       )}
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-medium text-sm truncate">{comment.user?.username ?? "مجهول"}</span>
-                        <span className="text-[10px] text-muted-foreground">{format(new Date(comment.createdAt), "yyyy/MM/dd HH:mm")}</span>
-                      </div>
                     </div>
-                    {publisherToken && (
-                      <button
-                        onClick={() => setDeleteCommentId(comment.id)}
-                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-                        title="حذف التعليق"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+
+                    {/* Inline edit mode */}
+                    {isEditingThis ? (
+                      <div className="space-y-2 pt-1">
+                        <Textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          className="bg-background resize-none h-20 text-sm"
+                          disabled={savingEdit}
+                          autoFocus
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            variant="ghost" size="sm"
+                            onClick={() => { setEditingCommentId(null); setEditingContent(""); }}
+                            disabled={savingEdit}
+                          >
+                            إلغاء
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSaveEdit}
+                            disabled={savingEdit || !editingContent.trim()}
+                          >
+                            {savingEdit ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                جارٍ الحفظ...
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1.5"><Check className="w-3.5 h-3.5" />حفظ</span>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm text-foreground/90 pr-10">{comment.content}</p>
+                        {c.isEdited && (
+                          <p className="text-[10px] text-muted-foreground/70 pr-10 italic">(تم تعديله)</p>
+                        )}
+                      </>
                     )}
                   </div>
-                  <p className="text-sm text-foreground/90 pl-10 pr-2">{comment.content}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
