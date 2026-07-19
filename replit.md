@@ -31,6 +31,9 @@
 | `SESSION_SECRET` | نص عشوائي لتشفير جلسات المستخدمين | ✅ إلزامي |
 | `TELEGRAM_BOT_TOKEN` | توكن البوت من @BotFather | ✅ إلزامي |
 | `TELEGRAM_CHANNEL_ID` | معرّف القناة (سالب: مثال -1001234567890) | ✅ إلزامي |
+| `CLERK_PUBLISHABLE_KEY` | مفتاح Clerk العام للخادم | ✅ إلزامي |
+| `CLERK_SECRET_KEY` | مفتاح Clerk السري للخادم | ✅ إلزامي |
+| `VITE_CLERK_PUBLISHABLE_KEY` | مفتاح Clerk العام للواجهة الأمامية | ✅ إلزامي |
 
 ---
 
