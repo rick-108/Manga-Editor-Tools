@@ -3,7 +3,6 @@ import { eq, sql } from "drizzle-orm";
 import { db, pagesTable, chaptersTable } from "@workspace/db";
 import { RemotePreviewBody } from "@workspace/api-zod";
 import { requirePublisher } from "../middlewares/publisher";
-import { storeRemoteImage } from "../lib/storage";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { randomUUID } from "crypto";
@@ -12,7 +11,7 @@ import { randomUUID } from "crypto";
 // JOB STORE (in-memory)
 // ─────────────────────────────────────────────
 
-export type JobStatus = "pending" | "fetching" | "downloading" | "done" | "error";
+export type JobStatus = "pending" | "fetching" | "storing" | "done" | "error";
 
 export interface ImportJob {
   id: string;
@@ -22,13 +21,12 @@ export interface ImportJob {
   mangaId: number;
   pageSourceUrl: string;
   total: number;
+  /** عدد الروابط التي خُزِّنت بنجاح في DB */
   downloaded: number;
-  /** pages that failed — kept for retry */
+  /** روابط فشل تخزينها — للمحاولة لاحقاً */
   failed: Array<{ index: number; url: string }>;
   startedAt: number;
-  /** page number offset so retry can recalculate the correct DB page_number */
   startPageNumber: number;
-  /** if true, chapter is published automatically when job finishes successfully */
   autoPublish: boolean;
 }
 
@@ -40,33 +38,6 @@ function addJob(job: ImportJob) {
     jobs.delete(oldest);
   }
   jobs.set(job.id, job);
-}
-
-// ─────────────────────────────────────────────
-// CONCURRENCY HELPER
-// ─────────────────────────────────────────────
-
-/**
- * Run `tasks` (functions returning Promises) with at most `limit` running simultaneously.
- * Results are returned in the same order as input tasks.
- */
-async function runWithConcurrency<T>(
-  tasks: Array<() => Promise<T>>,
-  limit: number
-): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
-  let cursor = 0;
-
-  async function worker() {
-    while (cursor < tasks.length) {
-      const i = cursor++;
-      results[i] = await tasks[i]();
-    }
-  }
-
-  const pool = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
-  await Promise.all(pool);
-  return results;
 }
 
 // ─────────────────────────────────────────────
@@ -312,9 +283,9 @@ async function fetchPageUrls(url: string): Promise<{
   $("script").each((_i, el) => { const t = $(el).html() ?? ""; if (t.length > 10) scripts.push(t); });
 
   const candidates: string[][] = [];
-  const ts = extractTsReader(html, url);       if (ts.length) candidates.push(ts);
+  const ts = extractTsReader(html, url);        if (ts.length) candidates.push(ts);
   const jb = extractFromJsonBlobs(scripts, url); if (jb.length) candidates.push(jb);
-  const ja = extractJsArrays(scripts, url);     if (ja.length) candidates.push(ja);
+  const ja = extractJsArrays(scripts, url);      if (ja.length) candidates.push(ja);
   if (!candidates.some(c => c.length > 2)) { const h = extractHtmlImgs($, url); if (h.length) candidates.push(h); }
   if (!candidates.some(c => c.length > 2)) { const a = extractAllImgs($, url);  if (a.length) candidates.push(a); }
   if (!candidates.some(c => c.length > 2)) { const n = extractAstroNanostores(html, url); if (n.length) candidates.push(n); }
@@ -338,69 +309,72 @@ async function fetchPageUrls(url: string): Promise<{
 }
 
 // ─────────────────────────────────────────────
-// PARALLEL DOWNLOAD WORKER
-// Concurrency: 5 simultaneous uploads.
-// Order is guaranteed by using the original array index as the pageNumber offset.
+// LINK STORAGE — يخزّن الروابط مباشرة في DB
+// بدون تحميل أو رفع أي صور — المتصفح يحملها من المصدر
+//
+// معالجة تسلسلية بمجموعات حجم 3 مع وقفة بسيطة بين كل مجموعة
+// لمنع الضغط على DB وإتاحة GC بين الـ batches.
 // ─────────────────────────────────────────────
 
-const UPLOAD_CONCURRENCY = 8;
+const BATCH_SIZE = 3;
+const BATCH_PAUSE_MS = 50; // وقفة قصيرة بين batches لإتاحة GC
 
-async function runDownloadJob(job: ImportJob, pageUrls: string[], startPageNumber: number) {
-  job.status = "downloading";
+async function storePageUrlsJob(job: ImportJob, pageUrls: string[], startPageNumber: number): Promise<void> {
+  job.status = "storing";
   job.total = pageUrls.length;
   job.startPageNumber = startPageNumber;
 
-  // Build one task per image — each task knows its final page number
-  const tasks = pageUrls.map((imageUrl, i) => async (): Promise<void> => {
-    const pageNumber = startPageNumber + i;
-    const ext = imageUrl.match(/\.(jpe?g|png|webp|gif|avif)/i)?.[0] ?? ".jpg";
-    const filename = `remote-${Date.now()}-${i}${ext}`;
-    try {
-      const storedUrl = await storeRemoteImage(imageUrl, filename, job.pageSourceUrl);
-      if (storedUrl) {
-        await db.insert(pagesTable).values({ chapterId: job.chapterId, pageNumber, imageUrl: storedUrl });
-        job.downloaded++;
-      } else {
-        job.failed.push({ index: i, url: imageUrl });
-      }
-    } catch {
-      job.failed.push({ index: i, url: imageUrl });
-    }
-  });
+  for (let i = 0; i < pageUrls.length; i += BATCH_SIZE) {
+    const batch = pageUrls.slice(i, i + BATCH_SIZE);
 
-  await runWithConcurrency(tasks, UPLOAD_CONCURRENCY);
+    // معالجة تسلسلية داخل كل batch
+    for (let j = 0; j < batch.length; j++) {
+      const pageNumber = startPageNumber + i + j;
+      const imageUrl = batch[j];
+      try {
+        await db.insert(pagesTable).values({ chapterId: job.chapterId, pageNumber, imageUrl });
+        job.downloaded++;
+      } catch {
+        job.failed.push({ index: i + j, url: imageUrl });
+      }
+    }
+
+    // وقفة بين batches + إتاحة event loop للـ GC
+    if (i + BATCH_SIZE < pageUrls.length) {
+      await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+    }
+  }
+
   job.status = "done";
 }
 
-async function runRetryJob(job: ImportJob, toRetry: Array<{ index: number; url: string }>) {
-  job.status = "downloading";
+async function retryStoreUrlsJob(job: ImportJob, toRetry: Array<{ index: number; url: string }>): Promise<void> {
+  job.status = "storing";
 
-  const tasks = toRetry.map(({ index, url: imageUrl }) => async (): Promise<void> => {
-    // Preserve the original page number so retried pages slot back in the right position
-    const pageNumber = job.startPageNumber + index;
-    const ext = imageUrl.match(/\.(jpe?g|png|webp|gif|avif)/i)?.[0] ?? ".jpg";
-    const filename = `retry-${Date.now()}-${index}${ext}`;
-    try {
-      const storedUrl = await storeRemoteImage(imageUrl, filename, job.pageSourceUrl);
-      if (storedUrl) {
-        // Use INSERT ... ON CONFLICT DO UPDATE so we don't duplicate if page_number already exists
+  for (let i = 0; i < toRetry.length; i += BATCH_SIZE) {
+    const batch = toRetry.slice(i, i + BATCH_SIZE);
+
+    for (const { index, url: imageUrl } of batch) {
+      const pageNumber = job.startPageNumber + index;
+      try {
         await db
           .insert(pagesTable)
-          .values({ chapterId: job.chapterId, pageNumber, imageUrl: storedUrl })
+          .values({ chapterId: job.chapterId, pageNumber, imageUrl })
           .onConflictDoUpdate({
             target: [pagesTable.chapterId, pagesTable.pageNumber],
-            set: { imageUrl: storedUrl },
+            set: { imageUrl },
           });
         job.downloaded++;
-      } else {
+      } catch {
         job.failed.push({ index, url: imageUrl });
       }
-    } catch {
-      job.failed.push({ index, url: imageUrl });
     }
-  });
 
-  await runWithConcurrency(tasks, UPLOAD_CONCURRENCY);
+    if (i + BATCH_SIZE < toRetry.length) {
+      await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+    }
+  }
+
   job.status = "done";
 }
 
@@ -412,7 +386,8 @@ const router: IRouter = Router();
 
 /**
  * POST /api/remote/start-import
- * Creates chapter, kicks off parallel background download, returns jobId immediately.
+ * يستخرج روابط الصور ويخزّنها مباشرة في DB — بدون تحميل أو رفع.
+ * يُعيد jobId فوراً، والعملية تكمل في الخلفية.
  */
 router.post("/remote/start-import", requirePublisher, async (req, res): Promise<void> => {
   const { url, mangaId, chapterNumber, chapterTitle, autoPublish } = req.body as {
@@ -428,7 +403,7 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
     return;
   }
 
-  // 1. Create chapter synchronously so we have a chapterId
+  // 1. أنشئ الفصل فوراً
   let chapterId: number;
   try {
     const [row] = await db
@@ -442,7 +417,7 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
     return;
   }
 
-  // 2. Create job record
+  // 2. سجّل الـ job
   const jobId = randomUUID();
   const job: ImportJob = {
     id: jobId,
@@ -459,10 +434,10 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
   };
   addJob(job);
 
-  // 3. Return immediately — browser gets jobId + chapterId right away
+  // 3. أعد الاستجابة فوراً
   res.json({ jobId, chapterId, mangaId });
 
-  // 4. Run fetch + parallel download in background (no await)
+  // 4. استخرج الروابط وخزّنها في الخلفية (بدون تحميل صور)
   ;(async () => {
     try {
       job.status = "fetching";
@@ -480,9 +455,11 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
         .where(eq(pagesTable.chapterId, chapterId));
 
       const startPage = Number(maxPage?.max ?? 0) + 1;
-      await runDownloadJob(job, pageUrls, startPage);
 
-      // Auto-publish if requested and at least some pages succeeded
+      // خزّن الروابط مباشرة — بدون تحميل
+      await storePageUrlsJob(job, pageUrls, startPage);
+
+      // نشر تلقائي إذا طُلب
       if (job.autoPublish && job.downloaded > 0) {
         await db
           .update(chaptersTable)
@@ -498,7 +475,7 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
 
 /**
  * GET /api/remote/job/:jobId
- * Returns current job progress.
+ * يُعيد حالة الـ job الحالية.
  */
 router.get("/remote/job/:jobId", requirePublisher, (req, res): void => {
   const job = jobs.get(req.params.jobId);
@@ -518,12 +495,12 @@ router.get("/remote/job/:jobId", requirePublisher, (req, res): void => {
 
 /**
  * POST /api/remote/job/:jobId/retry
- * Re-downloads failed pages at their original page numbers (parallel).
+ * يعيد تخزين الروابط الفاشلة.
  */
 router.post("/remote/job/:jobId/retry", requirePublisher, async (req, res): Promise<void> => {
   const job = jobs.get(req.params.jobId);
   if (!job) { res.status(404).json({ error: "لم يتم العثور على هذا الجاب" }); return; }
-  if (job.status === "downloading" || job.status === "fetching") {
+  if (job.status === "storing" || job.status === "fetching") {
     res.status(409).json({ error: "الجاب لا يزال يعمل" }); return;
   }
   if (job.failed.length === 0) {
@@ -536,7 +513,7 @@ router.post("/remote/job/:jobId/retry", requirePublisher, async (req, res): Prom
   res.json({ retrying: toRetry.length });
 
   ;(async () => {
-    await runRetryJob(job, toRetry);
+    await retryStoreUrlsJob(job, toRetry);
     if (job.autoPublish && job.downloaded > 0 && job.failed.length === 0) {
       await db
         .update(chaptersTable)
@@ -547,7 +524,8 @@ router.post("/remote/job/:jobId/retry", requirePublisher, async (req, res): Prom
 });
 
 /**
- * Legacy POST /api/remote/import (kept for backward compat) — parallel version
+ * POST /api/remote/import (legacy — backward compat)
+ * نفس السلوك الجديد: استخراج الروابط فقط بدون تحميل.
  */
 router.post("/remote/import", requirePublisher, async (req, res): Promise<void> => {
   const { url, chapterId } = req.body as { url: string; chapterId: number };
@@ -558,27 +536,31 @@ router.post("/remote/import", requirePublisher, async (req, res): Promise<void> 
       res.status(400).json({ success: false, importedPages: 0, message: "لم يتم العثور على صور", errors: [] });
       return;
     }
+
     const [maxPage] = await db
       .select({ max: sql<number>`COALESCE(MAX(page_number), 0)` })
       .from(pagesTable).where(eq(pagesTable.chapterId, chapterId));
-    const start = Number(maxPage?.max ?? 0) + 1;
+    const startPage = Number(maxPage?.max ?? 0) + 1;
 
     let imported = 0;
     const errors: string[] = [];
 
-    const tasks = pageUrls.map((imageUrl, i) => async () => {
-      const ext = imageUrl.match(/\.(jpe?g|png|webp|gif|avif)/i)?.[0] ?? ".jpg";
-      const fn = `remote-${Date.now()}-${i}${ext}`;
-      const stored = await storeRemoteImage(imageUrl, fn, url);
-      if (stored) {
-        await db.insert(pagesTable).values({ chapterId, pageNumber: start + i, imageUrl: stored });
-        imported++;
-      } else {
-        errors.push(`فشل تحميل الصفحة ${i + 1}`);
+    // تسلسلي بـ batches حجم 3
+    for (let i = 0; i < pageUrls.length; i += BATCH_SIZE) {
+      const batch = pageUrls.slice(i, i + BATCH_SIZE);
+      for (let j = 0; j < batch.length; j++) {
+        try {
+          await db.insert(pagesTable).values({ chapterId, pageNumber: startPage + i + j, imageUrl: batch[j] });
+          imported++;
+        } catch {
+          errors.push(`فشل تخزين الصفحة ${i + j + 1}`);
+        }
       }
-    });
+      if (i + BATCH_SIZE < pageUrls.length) {
+        await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+      }
+    }
 
-    await runWithConcurrency(tasks, UPLOAD_CONCURRENCY);
     res.json({ success: imported > 0, importedPages: imported, message: `تم استيراد ${imported} صفحة`, errors });
   } catch (err: any) {
     req.log.error({ err }, "legacy remote import failed");
