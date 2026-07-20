@@ -709,17 +709,28 @@ function BulkChapterUploader({ token }: { token: string }) {
 
   const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
-  /** Poll a job until done/error. Updates the log line as pages arrive. */
+  /** Poll a job until uploading/done/error. Resolves as soon as URLs are stored (chapter visible).
+   *  Telegram upload continues in the background — we don't block on it. */
   const pollJob = (jobId: string, logId: number, chap: number) =>
-    new Promise<{ downloaded: number; failedCount: number; error?: string }>(resolve => {
+    new Promise<{ downloaded: number; failedCount: number; error?: string; telegramPending?: boolean }>(resolve => {
       const iv = setInterval(async () => {
         if (stopRef.current) { clearInterval(iv); resolve({ downloaded: 0, failedCount: 0, error: "stopped" }); return; }
         try {
           const r = await fetch(`/api/remote/job/${jobId}`, { headers: { Authorization: `Bearer ${token}` } });
           if (!r.ok) return;
           const d = await r.json();
-          if ((d.status === "storing" || d.status === "fetching") && d.total > 0) {
-            patchLog(logId, { text: `🔗 الفصل ${chap}: ${d.downloaded}/${d.total} رابط...` });
+          if (d.status === "fetching") {
+            patchLog(logId, { text: `🔍 الفصل ${chap}: جاري استخراج الروابط...` });
+          }
+          if (d.status === "storing" && d.total > 0) {
+            patchLog(logId, { text: `🔗 الفصل ${chap}: ${d.downloaded}/${d.total} رابط مُخزَّن...` });
+          }
+          // "uploading" = الروابط في DB والفصل منشور، تليجرام يعمل في الخلفية
+          // نُحلّ الـ promise هنا مباشرة دون انتظار انتهاء تليجرام
+          if (d.status === "uploading") {
+            patchLog(logId, { text: `📤 الفصل ${chap}: ${d.downloaded} رابط — رفع تليجرام (${d.telegramUploaded ?? 0}/${d.telegramTotal ?? d.downloaded})` });
+            clearInterval(iv);
+            resolve({ downloaded: d.downloaded, failedCount: d.failedCount ?? 0, telegramPending: true });
           }
           if (d.status === "done")  { clearInterval(iv); resolve({ downloaded: d.downloaded, failedCount: d.failedCount ?? 0 }); }
           if (d.status === "error") { clearInterval(iv); resolve({ downloaded: 0, failedCount: 0, error: d.error ?? "خطأ غير معروف" }); }
@@ -778,7 +789,8 @@ function BulkChapterUploader({ token }: { token: string }) {
             errorCount++;
           } else if (!result.error) {
             const suffix = result.failedCount > 0 ? ` (⚠️ ${result.failedCount} فشلت)` : "";
-            patchLog(logId, { status: "done", text: `✅ الفصل ${chap}: تم — ${result.downloaded} صفحة${suffix}` });
+            const tgNote = result.telegramPending ? " — 📤 تليجرام يعمل بالخلفية" : "";
+            patchLog(logId, { status: "done", text: `✅ الفصل ${chap}: نُشر — ${result.downloaded} صفحة${suffix}${tgNote}` });
             successCount++;
             queryClient.invalidateQueries({ queryKey: ["/api/publisher/pending-chapters"] });
           }

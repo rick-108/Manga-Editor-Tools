@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, pagesTable, chaptersTable } from "@workspace/db";
 import { RemotePreviewBody } from "@workspace/api-zod";
 import { requirePublisher } from "../middlewares/publisher";
+import { storeRemoteImage } from "../lib/storage";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { randomUUID } from "crypto";
@@ -11,7 +12,14 @@ import { randomUUID } from "crypto";
 // JOB STORE (in-memory)
 // ─────────────────────────────────────────────
 
-export type JobStatus = "pending" | "fetching" | "storing" | "done" | "error";
+/**
+ * fetching   → يستخرج روابط الصور من صفحة الفصل
+ * storing    → يخزّن الروابط الأصلية في DB (النشر الفوري)
+ * uploading  → الروابط في DB والفصل منشور — جاري رفع الصور لتليجرام في الخلفية
+ * done       → رفع تليجرام اكتمل
+ * error      → فشل
+ */
+export type JobStatus = "pending" | "fetching" | "storing" | "uploading" | "done" | "error";
 
 export interface ImportJob {
   id: string;
@@ -20,14 +28,21 @@ export interface ImportJob {
   chapterId: number;
   mangaId: number;
   pageSourceUrl: string;
+  /** إجمالي الروابط المُستخرَجة */
   total: number;
-  /** عدد الروابط التي خُزِّنت بنجاح في DB */
+  /** روابط مُخزَّنة في DB */
   downloaded: number;
-  /** روابط فشل تخزينها — للمحاولة لاحقاً */
+  /** روابط فشل تخزينها */
   failed: Array<{ index: number; url: string }>;
   startedAt: number;
   startPageNumber: number;
   autoPublish: boolean;
+  /** إجمالي الصور المطلوب رفعها لتليجرام */
+  telegramTotal: number;
+  /** صور رُفعت لتليجرام بنجاح */
+  telegramUploaded: number;
+  /** صور فشل رفعها لتليجرام */
+  telegramFailed: number;
 }
 
 const jobs = new Map<string, ImportJob>();
@@ -309,15 +324,12 @@ async function fetchPageUrls(url: string): Promise<{
 }
 
 // ─────────────────────────────────────────────
-// LINK STORAGE — يخزّن الروابط مباشرة في DB
-// بدون تحميل أو رفع أي صور — المتصفح يحملها من المصدر
-//
-// معالجة تسلسلية بمجموعات حجم 3 مع وقفة بسيطة بين كل مجموعة
-// لمنع الضغط على DB وإتاحة GC بين الـ batches.
+// PHASE 1 — تخزين الروابط الأصلية في DB فوراً
+// تسلسلي، batches حجم 3، بدون أي تحميل.
 // ─────────────────────────────────────────────
 
 const BATCH_SIZE = 3;
-const BATCH_PAUSE_MS = 50; // وقفة قصيرة بين batches لإتاحة GC
+const BATCH_PAUSE_MS = 50;
 
 async function storePageUrlsJob(job: ImportJob, pageUrls: string[], startPageNumber: number): Promise<void> {
   job.status = "storing";
@@ -326,8 +338,6 @@ async function storePageUrlsJob(job: ImportJob, pageUrls: string[], startPageNum
 
   for (let i = 0; i < pageUrls.length; i += BATCH_SIZE) {
     const batch = pageUrls.slice(i, i + BATCH_SIZE);
-
-    // معالجة تسلسلية داخل كل batch
     for (let j = 0; j < batch.length; j++) {
       const pageNumber = startPageNumber + i + j;
       const imageUrl = batch[j];
@@ -338,14 +348,53 @@ async function storePageUrlsJob(job: ImportJob, pageUrls: string[], startPageNum
         job.failed.push({ index: i + j, url: imageUrl });
       }
     }
-
-    // وقفة بين batches + إتاحة event loop للـ GC
     if (i + BATCH_SIZE < pageUrls.length) {
       await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
     }
   }
+  // لا نغيّر status هنا — المُستدعي يحدّده بعد النشر وإطلاق تليجرام
+}
 
-  job.status = "done";
+// ─────────────────────────────────────────────
+// PHASE 2 — رفع الصور لتليجرام في الخلفية
+// يقرأ الصفحات ذات الروابط الأصلية من DB ويستبدلها بروابط تليجرام.
+// يعمل بعد النشر الفوري — المستخدم لا ينتظره.
+// ─────────────────────────────────────────────
+
+async function uploadPagesToTelegramJob(job: ImportJob): Promise<void> {
+  // تحقّق من توفر مفاتيح تليجرام قبل البدء
+  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHANNEL_ID) return;
+
+  // اجلب الصفحات التي لا تزال على رابط أصلي (لم تُرفع لتليجرام بعد)
+  const pages = await db
+    .select({ id: pagesTable.id, pageNumber: pagesTable.pageNumber, imageUrl: pagesTable.imageUrl })
+    .from(pagesTable)
+    .where(eq(pagesTable.chapterId, job.chapterId))
+    .orderBy(pagesTable.pageNumber);
+
+  const pending = pages.filter(p => p.imageUrl.startsWith("http"));
+  job.telegramTotal = pending.length;
+
+  for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+    const batch = pending.slice(i, i + BATCH_SIZE);
+    for (const page of batch) {
+      const ext = page.imageUrl.match(/\.(jpe?g|png|webp|gif|avif)/i)?.[0] ?? ".jpg";
+      const filename = `tg-${job.chapterId}-${page.pageNumber}${ext}`;
+      try {
+        const telegramUrl = await storeRemoteImage(page.imageUrl, filename, job.pageSourceUrl);
+        await db
+          .update(pagesTable)
+          .set({ imageUrl: telegramUrl })
+          .where(eq(pagesTable.id, page.id));
+        job.telegramUploaded++;
+      } catch {
+        job.telegramFailed++;
+      }
+    }
+    if (i + BATCH_SIZE < pending.length) {
+      await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
+    }
+  }
 }
 
 async function retryStoreUrlsJob(job: ImportJob, toRetry: Array<{ index: number; url: string }>): Promise<void> {
@@ -353,7 +402,6 @@ async function retryStoreUrlsJob(job: ImportJob, toRetry: Array<{ index: number;
 
   for (let i = 0; i < toRetry.length; i += BATCH_SIZE) {
     const batch = toRetry.slice(i, i + BATCH_SIZE);
-
     for (const { index, url: imageUrl } of batch) {
       const pageNumber = job.startPageNumber + index;
       try {
@@ -369,7 +417,6 @@ async function retryStoreUrlsJob(job: ImportJob, toRetry: Array<{ index: number;
         job.failed.push({ index, url: imageUrl });
       }
     }
-
     if (i + BATCH_SIZE < toRetry.length) {
       await new Promise(r => setTimeout(r, BATCH_PAUSE_MS));
     }
@@ -431,15 +478,20 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
     startedAt: Date.now(),
     startPageNumber: 1,
     autoPublish: autoPublish ?? false,
+    telegramTotal: 0,
+    telegramUploaded: 0,
+    telegramFailed: 0,
   };
   addJob(job);
 
   // 3. أعد الاستجابة فوراً
   res.json({ jobId, chapterId, mangaId });
 
-  // 4. استخرج الروابط وخزّنها في الخلفية (بدون تحميل صور)
+  // 4. المرحلة الأولى: استخرج الروابط وخزّنها → انشر فوراً
+  //    المرحلة الثانية: ارفع الصور لتليجرام في الخلفية (لا ينتظرها العميل)
   ;(async () => {
     try {
+      // ── المرحلة 1: استخراج وتخزين الروابط ──────────────
       job.status = "fetching";
       const { pageUrls } = await fetchPageUrls(url);
 
@@ -455,17 +507,23 @@ router.post("/remote/start-import", requirePublisher, async (req, res): Promise<
         .where(eq(pagesTable.chapterId, chapterId));
 
       const startPage = Number(maxPage?.max ?? 0) + 1;
-
-      // خزّن الروابط مباشرة — بدون تحميل
       await storePageUrlsJob(job, pageUrls, startPage);
 
-      // نشر تلقائي إذا طُلب
+      // ── النشر الفوري ─────────────────────────────────────
       if (job.autoPublish && job.downloaded > 0) {
         await db
           .update(chaptersTable)
           .set({ status: "published", publishedAt: new Date() })
           .where(eq(chaptersTable.id, chapterId));
       }
+
+      // ── المرحلة 2: رفع تليجرام في الخلفية ───────────────
+      // status = "uploading" يعني: "الفصل منشور، تليجرام يعمل الآن"
+      // العميل يعتبر الفصل مكتملاً عند هذه النقطة ولا ينتظر أكثر.
+      job.status = "uploading";
+      await uploadPagesToTelegramJob(job);
+      job.status = "done";
+
     } catch (err: any) {
       job.status = "error";
       job.error = err?.message ?? "خطأ غير معروف";
@@ -490,6 +548,9 @@ router.get("/remote/job/:jobId", requirePublisher, (req, res): void => {
     downloaded: job.downloaded,
     failedCount: job.failed.length,
     autoPublish: job.autoPublish,
+    telegramTotal: job.telegramTotal,
+    telegramUploaded: job.telegramUploaded,
+    telegramFailed: job.telegramFailed,
   });
 });
 
