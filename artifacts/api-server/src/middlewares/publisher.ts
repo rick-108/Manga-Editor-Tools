@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
 
-const PUBLISHER_TOKEN = process.env.PUBLISHER_TOKEN ?? "rtn_publisher_secret_token";
+const PUBLISHER_TOKEN = process.env.PUBLISHER_TOKEN;
+if (!PUBLISHER_TOKEN) {
+  throw new Error("PUBLISHER_TOKEN غير موجود في البيئة — أضفه في Secrets");
+}
 
 export function requirePublisher(req: Request, res: Response, next: NextFunction): void {
   const auth = req.headers.authorization;

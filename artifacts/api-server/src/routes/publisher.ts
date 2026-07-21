@@ -4,8 +4,11 @@ import { db, mangaTable, chaptersTable, pagesTable } from "@workspace/db";
 import { PublisherAuthBody } from "@workspace/api-zod";
 import { requirePublisher } from "../middlewares/publisher";
 
-const PUBLISHER_CODE = process.env.PUBLISHER_CODE ?? "rtn_publisher_2024";
-const PUBLISHER_TOKEN = process.env.PUBLISHER_TOKEN ?? "rtn_publisher_secret_token";
+const PUBLISHER_CODE = process.env.PUBLISHER_CODE;
+const PUBLISHER_TOKEN = process.env.PUBLISHER_TOKEN;
+if (!PUBLISHER_CODE || !PUBLISHER_TOKEN) {
+  throw new Error("PUBLISHER_CODE أو PUBLISHER_TOKEN غير موجود في البيئة — أضفهما في Secrets");
+}
 
 const router: IRouter = Router();
 

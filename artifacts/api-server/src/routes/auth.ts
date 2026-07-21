@@ -5,8 +5,11 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const PUBLISHER_CODE = process.env.PUBLISHER_CODE ?? "rtn_publisher_2024";
-const JWT_SECRET = process.env.SESSION_SECRET ?? "rtn_manga_jwt_secret_fallback";
+const PUBLISHER_CODE = process.env.PUBLISHER_CODE;
+const JWT_SECRET = process.env.SESSION_SECRET;
+if (!PUBLISHER_CODE || !JWT_SECRET) {
+  throw new Error("PUBLISHER_CODE أو SESSION_SECRET غير موجود في البيئة — أضفهما في Secrets");
+}
 
 // Clerk-based user auth middleware (cookie session)
 export function requireUser(req: any, res: any, next: any): void {

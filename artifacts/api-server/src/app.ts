@@ -36,7 +36,25 @@ app.use(
 // Clerk proxy — must be before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
-app.use(cors({ credentials: true, origin: true }));
+// CORS: في الإنتاج يُقيَّد بـ ALLOWED_ORIGINS، في التطوير يُسمح بكل المصادر
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : null;
+
+app.use(
+  cors({
+    credentials: true,
+    origin: (origin, callback) => {
+      // طلبات بدون origin (same-origin أو curl) — مسموح
+      if (!origin) return callback(null, true);
+      // بيئة تطوير بدون قائمة بيضاء — مسموح
+      if (!allowedOrigins) return callback(null, true);
+      // بيئة إنتاج — فقط المصادر المعتمدة
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS: المصدر غير مسموح به: ${origin}`));
+    },
+  }),
+);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 

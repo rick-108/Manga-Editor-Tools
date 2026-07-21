@@ -7,7 +7,10 @@ import { awardXp } from "../lib/xp";
 import jwt from "jsonwebtoken";
 import { getAuth } from "@clerk/express";
 
-const JWT_SECRET = process.env.SESSION_SECRET ?? "rtn_manga_jwt_secret_fallback";
+const JWT_SECRET = process.env.SESSION_SECRET;
+if (!JWT_SECRET) {
+  throw new Error("SESSION_SECRET غير موجود في البيئة — أضفه في Secrets");
+}
 
 const router: IRouter = Router();
 
