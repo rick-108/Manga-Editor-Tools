@@ -141,11 +141,20 @@ async function insertPage(chapterId, pageNumber, imageUrl) {
  *      https://site.com/manga/solo  →  https://site.com/manga/solo/5
  */
 function buildChapterUrl(base, num) {
+  // الصيغة 1: {chapter} placeholder صريح
   if (base.includes("{chapter}")) {
     return base.replace(/\{chapter\}/g, String(num));
   }
-  // fallback: أضف الرقم في النهاية
-  return `${base.replace(/\/+$/, "")}/${num}`;
+
+  // الصيغة 2: رقم مكتوب بعد chapter- / ep- / ch- / chap- / فصل-
+  // مثال: one-piece-chapter-1 → one-piece-chapter-60
+  const chapterPattern = /((chapter|chap|ep|ch|فصل)-)(\d+)/i;
+  if (chapterPattern.test(base)) {
+    return base.replace(chapterPattern, `$1${num}`);
+  }
+
+  // الصيغة 3 (fallback): أضف الرقم في نهاية الرابط
+  return `${base.replace(/\/+$/,"")}/${num}`;
 }
 
 /** محاولة جلب صفحة ويب مع headers المتصفح */
