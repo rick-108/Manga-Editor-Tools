@@ -1,0 +1,11 @@
+[
+  {
+    "mangaName": "ون بيس",
+    "mangaId": null,
+    "baseUrl": "https://despair-manga.net/one-piece-chapter-1/",
+    "totalChapters": 1120,
+    "autoPublish": true,
+    "status": "active",
+    "_comment": "status: active | paused | completed — يمكنك تغيير الحالة يدوياً"
+  }
+]

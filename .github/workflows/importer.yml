@@ -1,7 +1,7 @@
 name: RTN Manga — Background Importer
 
 on:
-  # ── تشغيل تلقائي كل 6 ساعات (رفع الصور المتبقية فقط) ──────────────────────
+  # ── تشغيل تلقائي كل 6 ساعات — يكمل القائمة (50 فصل كحد أقصى لكل تشغيلة) ──
   schedule:
     - cron: "0 */6 * * *"
 
@@ -11,39 +11,41 @@ on:
       job:
         description: "اختر العملية"
         required: true
-        default: "import-chapters"
+        default: "queue-import"
         type: choice
         options:
-          - import-chapters   # استيراد فصول جديدة
-          - upload-pending    # رفع الصور المتبقية لتليجرام فقط
+          - queue-import      # استيراد تلقائي من manga-queue.json (الافتراضي)
+          - import-chapters   # استيراد يدوي بتحديد المانغا والرابط
+          - upload-pending    # رفع الصور المباشرة المتبقية لتليجرام فقط
 
+      # ── حقول الوضع اليدوي (import-chapters فقط) ─────────────────────────────
       manga_name:
-        description: "اسم المانغا كما هو مسجّل في الموقع — مثال: سولو ليفلنغ"
+        description: "اسم المانغا كما هو مسجّل في الموقع (للوضع اليدوي)"
         required: false
         default: ""
 
       base_url:
         description: |
-          نمط رابط الفصول — استخدم {chapter} مكان رقم الفصل
-          مثال: https://despair-manga.net/one-piece-chapter-{chapter}/
-          أو بدون placeholder: https://site.com/manga/solo-leveling
+          نمط رابط الفصول (للوضع اليدوي)
+          مثال: https://despair-manga.net/one-piece-chapter-1/
+          أو مع placeholder: https://site.com/manga/solo-chapter-{chapter}/
         required: false
         default: ""
 
       start_chapter:
-        description: "رقم أول فصل"
+        description: "رقم أول فصل (للوضع اليدوي)"
         required: false
         default: "1"
 
       end_chapter:
-        description: "رقم آخر فصل"
+        description: "رقم آخر فصل (للوضع اليدوي)"
         required: false
-        default: "10"
+        default: "50"
 
       delay_seconds:
-        description: "ثواني الانتظار بين الفصول (افتراضي: 5)"
+        description: "ثواني الانتظار بين دفعات الفصول (افتراضي: 2)"
         required: false
-        default: "5"
+        default: "2"
 
       auto_publish:
         description: "نشر الفصول تلقائياً بعد الاستيراد؟"
@@ -59,9 +61,9 @@ on:
 
 jobs:
   run:
-    name: ${{ github.event.inputs.job || 'upload-pending (scheduled)' }}
+    name: ${{ github.event.inputs.job || 'queue-import (scheduled)' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 3 ساعات كحد أقصى
+    timeout-minutes: 330  # 5.5 ساعات — أقل من حد 6 ساعات كروnjob بهامش آمن
 
     steps:
       # ── 1. سحب الكود ─────────────────────────────────────────────────────────
@@ -91,27 +93,39 @@ jobs:
           node -e "require('cheerio'); console.log('✅ cheerio')"  || (echo '❌ cheerio مفقود' && exit 1)
         working-directory: scripts
 
-      # ── 5a. استيراد فصول جديدة (تشغيل يدوي) ────────────────────────────────
-      - name: استيراد فصول
+      # ── 5a. استيراد من القائمة (تشغيل تلقائي + يدوي queue-import) ──────────
+      - name: استيراد من القائمة (queue-import)
+        if: github.event_name == 'schedule' || github.event.inputs.job == 'queue-import'
+        env:
+          NEON_DATABASE_URL:   ${{ secrets.NEON_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          QUEUE_MODE:          "true"
+          IMPORTER_DRY_RUN:    ${{ github.event.inputs.dry_run || 'false' }}
+        run: node scripts/chapter-importer.mjs --queue
+
+      # ── 5b. استيراد يدوي بتحديد المانغا والرابط ─────────────────────────────
+      - name: استيراد فصول (يدوي)
         if: github.event.inputs.job == 'import-chapters'
         env:
-          NEON_DATABASE_URL:    ${{ secrets.NEON_DATABASE_URL }}
-          # نمرّر القيم كـ env vars لتجنب مشكلة المسافات والأحرف العربية في shell
-          IMPORTER_MANGA_NAME:  ${{ github.event.inputs.manga_name }}
-          IMPORTER_BASE_URL:    ${{ github.event.inputs.base_url }}
-          IMPORTER_START:       ${{ github.event.inputs.start_chapter }}
-          IMPORTER_END:         ${{ github.event.inputs.end_chapter }}
-          IMPORTER_DELAY:       ${{ github.event.inputs.delay_seconds }}
-          IMPORTER_PUBLISH:     ${{ github.event.inputs.auto_publish }}
-          IMPORTER_DRY_RUN:     ${{ github.event.inputs.dry_run }}
+          NEON_DATABASE_URL:   ${{ secrets.NEON_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          IMPORTER_MANGA_NAME: ${{ github.event.inputs.manga_name }}
+          IMPORTER_BASE_URL:   ${{ github.event.inputs.base_url }}
+          IMPORTER_START:      ${{ github.event.inputs.start_chapter }}
+          IMPORTER_END:        ${{ github.event.inputs.end_chapter }}
+          IMPORTER_DELAY:      ${{ github.event.inputs.delay_seconds }}
+          IMPORTER_PUBLISH:    ${{ github.event.inputs.auto_publish }}
+          IMPORTER_DRY_RUN:    ${{ github.event.inputs.dry_run }}
         run: node scripts/chapter-importer.mjs
 
-      # ── 5b. رفع الصور المتبقية (تلقائي كل 6 ساعات + يدوي) ─────────────────
+      # ── 5c. رفع الصور المباشرة المتبقية لتليجرام (للصور القديمة فقط) ────────
       - name: رفع الصور المتبقية لتليجرام
-        if: github.event.inputs.job == 'upload-pending' || github.event_name == 'schedule'
+        if: github.event.inputs.job == 'upload-pending'
         env:
-          NEON_DATABASE_URL:    ${{ secrets.NEON_DATABASE_URL }}
-          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID:  ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          IMPORTER_DRY_RUN:     ${{ github.event.inputs.dry_run }}
+          NEON_DATABASE_URL:   ${{ secrets.NEON_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          IMPORTER_DRY_RUN:    ${{ github.event.inputs.dry_run }}
         run: node scripts/telegram-uploader.mjs
