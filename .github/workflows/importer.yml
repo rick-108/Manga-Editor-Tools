@@ -1,32 +1,64 @@
-name: Telegram Uploader — رفع صفحات المانغا
+name: RTN Manga — Background Importer
 
 on:
-  # تشغيل تلقائي كل 6 ساعات
+  # ── تشغيل تلقائي كل 6 ساعات (رفع الصور المتبقية فقط) ──────────────────────
   schedule:
     - cron: "0 */6 * * *"
 
-  # تشغيل يدوي من واجهة GitHub مع خيارات اختيارية
+  # ── تشغيل يدوي من GitHub ────────────────────────────────────────────────────
   workflow_dispatch:
     inputs:
-      manga_id:
-        description: "رقم المانغا (اتركه فارغاً للكل)"
+      job:
+        description: "اختر العملية"
+        required: true
+        default: "import-chapters"
+        type: choice
+        options:
+          - import-chapters   # استيراد فصول جديدة
+          - upload-pending    # رفع الصور المتبقية لتليجرام فقط
+
+      manga_name:
+        description: "اسم المانغا كما هو في الموقع — مثال: سولو ليفلنغ"
         required: false
         default: ""
-      chapter_id:
-        description: "رقم الفصل المحدد (اتركه فارغاً للكل)"
+
+      base_url:
+        description: "رابط الفصل الأول — مثال: https://site.com/manga/title"
         required: false
         default: ""
+
+      start_chapter:
+        description: "رقم أول فصل"
+        required: false
+        default: "1"
+
+      end_chapter:
+        description: "رقم آخر فصل"
+        required: false
+        default: "10"
+
+      delay_seconds:
+        description: "ثواني الانتظار بين الفصول (افتراضي: 10)"
+        required: false
+        default: "10"
+
+      auto_publish:
+        description: "نشر الفصول تلقائياً بعد الاستيراد؟"
+        type: boolean
+        required: false
+        default: true
+
       dry_run:
-        description: "معاينة فقط بدون رفع فعلي"
+        description: "معاينة فقط بدون تغييرات (اختبار الروابط)"
         type: boolean
         required: false
         default: false
 
 jobs:
-  upload:
-    name: رفع الصفحات إلى Telegram
+  run:
+    name: ${{ github.event.inputs.job || 'upload-pending (scheduled)' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # حد أقصى ساعتين للفصول الكبيرة
+    timeout-minutes: 180  # 3 ساعات كحد أقصى
 
     steps:
       - name: سحب الكود
@@ -45,23 +77,31 @@ jobs:
       - name: تثبيت المكتبات
         run: pnpm install --frozen-lockfile
 
-      - name: تشغيل الـ Worker (كل الصفحات)
-        if: github.event_name == 'schedule'
+      # ── استيراد فصول جديدة (تشغيل يدوي فقط) ─────────────────────────────────
+      - name: استيراد فصول
+        if: github.event.inputs.job == 'import-chapters'
         env:
-          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          NEON_DATABASE_URL:   ${{ secrets.NEON_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-        run: node scripts/telegram-uploader.mjs
+        run: |
+          ARGS="--manga=${{ github.event.inputs.manga_name }}"
+          ARGS="$ARGS --base-url=${{ github.event.inputs.base_url }}"
+          ARGS="$ARGS --start=${{ github.event.inputs.start_chapter }}"
+          ARGS="$ARGS --end=${{ github.event.inputs.end_chapter }}"
+          ARGS="$ARGS --delay=${{ github.event.inputs.delay_seconds }}"
+          [ "${{ github.event.inputs.auto_publish }}" = "false" ] && ARGS="$ARGS --no-publish"
+          [ "${{ github.event.inputs.dry_run }}"     = "true"  ] && ARGS="$ARGS --dry-run"
+          node scripts/chapter-importer.mjs $ARGS
 
-      - name: تشغيل الـ Worker (تشغيل يدوي)
-        if: github.event_name == 'workflow_dispatch'
+      # ── رفع الصور المتبقية (تلقائي كل 6 ساعات + يدوي) ──────────────────────
+      - name: رفع الصور المتبقية لتليجرام
+        if: github.event.inputs.job == 'upload-pending' || github.event_name == 'schedule'
         env:
-          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          NEON_DATABASE_URL:   ${{ secrets.NEON_DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: |
           ARGS=""
-          [ -n "${{ github.event.inputs.manga_id }}"   ] && ARGS="$ARGS --manga-id=${{ github.event.inputs.manga_id }}"
-          [ -n "${{ github.event.inputs.chapter_id }}" ] && ARGS="$ARGS --chapter-id=${{ github.event.inputs.chapter_id }}"
           [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
           node scripts/telegram-uploader.mjs $ARGS
