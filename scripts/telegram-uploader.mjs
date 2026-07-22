@@ -39,8 +39,10 @@ const getArg = (name) => {
   const found = args.find(a => a.startsWith(`--${name}=`));
   return found ? found.split("=")[1] : null;
 };
-const DRY_RUN    = args.includes("--dry-run");
-const MANGA_ID   = getArg("manga-id")   ? parseInt(getArg("manga-id"))   : null;
+const DRY_RUN    = process.env.IMPORTER_DRY_RUN === "true" || args.includes("--dry-run");
+const MANGA_ID   = process.env.IMPORTER_MANGA_ID
+                     ? parseInt(process.env.IMPORTER_MANGA_ID)
+                     : getArg("manga-id") ? parseInt(getArg("manga-id")) : null;
 const CHAPTER_ID = getArg("chapter-id") ? parseInt(getArg("chapter-id")) : null;
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -45,14 +45,19 @@ const getArg = (name) => {
   return found ? found.split("=").slice(1).join("=") : null;
 };
 
-const MANGA_NAME  = getArg("manga");                                  // اسم المانغا (بحث)
-const MANGA_ID    = getArg("manga-id") ? parseInt(getArg("manga-id")) : null;
-const BASE_URL    = getArg("base-url");                               // مثال: https://site.com/manga/title
-const START       = parseInt(getArg("start") ?? "1");
-const END         = parseInt(getArg("end")   ?? "1");
-const DELAY_SEC   = parseInt(getArg("delay") ?? "10");
-const AUTO_PUBLISH = !args.includes("--no-publish");
-const DRY_RUN     = args.includes("--dry-run");
+// يقرأ من env vars (GitHub Actions) أو CLI args (تشغيل يدوي)
+const MANGA_NAME   = process.env.IMPORTER_MANGA_NAME  || getArg("manga")    || null;
+const MANGA_ID     = process.env.IMPORTER_MANGA_ID
+                       ? parseInt(process.env.IMPORTER_MANGA_ID)
+                       : getArg("manga-id") ? parseInt(getArg("manga-id")) : null;
+const BASE_URL     = process.env.IMPORTER_BASE_URL    || getArg("base-url") || null;
+const START        = parseInt(process.env.IMPORTER_START   || getArg("start") || "1");
+const END          = parseInt(process.env.IMPORTER_END     || getArg("end")   || "1");
+const DELAY_SEC    = parseInt(process.env.IMPORTER_DELAY   || getArg("delay") || "10");
+const AUTO_PUBLISH = process.env.IMPORTER_PUBLISH !== undefined
+                       ? process.env.IMPORTER_PUBLISH !== "false"
+                       : !args.includes("--no-publish");
+const DRY_RUN      = process.env.IMPORTER_DRY_RUN === "true" || args.includes("--dry-run");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VALIDATION
