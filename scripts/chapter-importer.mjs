@@ -181,40 +181,137 @@ function extractImages(html, chapterUrl) {
   const images = [];
   const origin = new URL(chapterUrl).origin;
 
-  // أنماط شائعة — بالترتيب من الأكثر شيوعاً
+  // ── قراءة جميع سمات التحميل الذكي (lazy-load attributes) ──────────────────
+  const lazyAttrs = [
+    "data-src",
+    "data-lazy-src",
+    "data-original",
+    "data-url",
+    "data-wp-src",
+    "data-cfsrc",
+    "src",
+  ];
+
+  function resolveUrl(raw) {
+    if (!raw || raw.includes("data:image") || raw.trim() === "") return null;
+    let url = raw.trim();
+    if (url.startsWith("//"))    url = "https:" + url;
+    else if (url.startsWith("/")) url = origin + url;
+    return url.startsWith("http") ? url : null;
+  }
+
+  function pickSrc(el) {
+    for (const attr of lazyAttrs) {
+      const val = $(el).attr(attr);
+      const url = resolveUrl(val || "");
+      if (url) return url;
+    }
+    return null;
+  }
+
+  // أنماط CSS للحاويات — بالترتيب من الأكثر شيوعاً
   const selectors = [
+    // أنماط الـ manga reader themes
     ".reading-content img",
     ".chapter-content img",
     "#chapter-reader img",
     ".page-chapter img",
+    ".chapter-images img",
     ".chapter img",
+    // ts-reader / mangareader WordPress theme
+    "#readerarea img",
+    ".ts-reader img",
+    ".reader-area img",
+    // lazy-load selectors
     "img[data-src]",
     "img[data-lazy-src]",
+    "img[data-original]",
+    "img[data-url]",
+    "img[data-wp-src]",
+    "img[data-cfsrc]",
+    // حاويات عامة
     ".pages-container img",
     "#pages img",
+    ".page-break img",
+    ".wp-manga-chapter-img",
+    "img.wp-manga-chapter-img",
   ];
 
   for (const sel of selectors) {
+    const found = [];
     $(sel).each((_, el) => {
-      const src =
-        $(el).attr("data-src") ||
-        $(el).attr("data-lazy-src") ||
-        $(el).attr("src") || "";
-
-      if (!src || src.includes("data:image")) return;
-
-      let url = src.trim();
-      if (url.startsWith("//")) url = "https:" + url;
-      else if (url.startsWith("/"))  url = origin + url;
-
-      if (url.startsWith("http")) images.push(url);
+      const url = pickSrc(el);
+      if (url) found.push(url);
     });
 
-    if (images.length >= 3) break; // وجدنا الصور بهذا الـ selector
+    if (found.length >= 3) {
+      found.forEach(u => images.push(u));
+      break;
+    }
   }
 
   // إزالة المكررات
   return [...new Set(images)];
+}
+
+/**
+ * استخراج روابط الصور من مواقع تعتمد على ts_reader / mangareader
+ * التي تحمّل الصور عبر JavaScript (الـ #readerarea فارغ في HTML الثابت).
+ *
+ * الطريقة: نستخرج مسار مجلد الفصل من og:image ثم نعدّد الصور
+ * تسلسلياً حتى نصل لـ 404.
+ */
+async function extractImagesFromOgAndEnumerate(html, chapterUrl) {
+  const $ = cheerio.load(html);
+  const origin = new URL(chapterUrl).origin;
+
+  // استخراج رابط og:image
+  const ogImage = $('meta[property="og:image"]').attr("content") || "";
+  if (!ogImage) return [];
+
+  // بناء مسار المجلد من رابط الصورة الأولى
+  // مثال: https://site.com/wp-content/uploads/manga/chapter_abc/001.webp
+  //  → baseDir = https://site.com/wp-content/uploads/manga/chapter_abc/
+  const lastSlash = ogImage.lastIndexOf("/");
+  if (lastSlash === -1) return [];
+  const baseDir   = ogImage.slice(0, lastSlash + 1);
+  const firstName = ogImage.slice(lastSlash + 1); // مثال: 001.webp
+  const extMatch  = firstName.match(/\.(webp|jpe?g|png|avif|gif)$/i);
+  const ext       = extMatch ? extMatch[0] : ".webp";
+
+  console.log(`  🔍  ts_reader mode — عدّد الصور من: ${baseDir}`);
+
+  // حدّد أعلى رقم ممكن للصور (حدّ واقي)
+  const MAX_PAGES = 300;
+  const images    = [];
+
+  for (let i = 1; i <= MAX_PAGES; i++) {
+    const padded  = String(i).padStart(3, "0");
+    const testUrl = `${baseDir}${padded}${ext}`;
+
+    try {
+      const res = await axios.head(testUrl, {
+        timeout: 10_000,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Referer":    origin + "/",
+        },
+        validateStatus: s => s < 500,
+        maxRedirects: 5,
+      });
+
+      if (res.status === 200 || res.status === 301 || res.status === 302) {
+        images.push(testUrl);
+      } else {
+        // 404 → توقف — انتهت صفحات الفصل
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+
+  return images;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,8 +403,16 @@ async function importChapter(manga, chapterNum) {
     return { failed: true };
   }
 
-  // استخراج روابط الصور
-  const imageUrls = extractImages(html, chapterUrl);
+  // استخراج روابط الصور — المحاولة الأولى بالـ selectors العادية
+  let imageUrls = extractImages(html, chapterUrl);
+
+  // إذا لم نجد صوراً، ربما الموقع يحمّلها عبر JavaScript (ts_reader / mangareader)
+  // نجرب استخراجها من og:image ثم تعداد الصور تسلسلياً
+  if (imageUrls.length === 0) {
+    console.log(`  ⚠️   لم تُوجد صور بالـ selectors العادية — جاري تجربة وضع ts_reader…`);
+    imageUrls = await extractImagesFromOgAndEnumerate(html, chapterUrl);
+  }
+
   if (imageUrls.length === 0) {
     console.error(`  ❌  لم يُعثر على صور في الصفحة — قد يكون الموقع يحمي محتواه أو الـ selector مختلف`);
     return { failed: true };
