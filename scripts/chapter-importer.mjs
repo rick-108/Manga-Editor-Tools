@@ -2,36 +2,37 @@
 /**
  * chapter-importer.mjs
  *
- * يستورد فصولاً من موقع خارجي ويخزّنها مباشرة في قاعدة البيانات + Telegram.
+ * يستورد فصولاً من موقع خارجي ويخزّن روابط الصور مباشرة في قاعدة البيانات.
  * يعمل مستقلاً على GitHub Actions — لا يحتاج فتح الموقع أو Replit.
  *
  * المتطلبات (environment variables):
  *   NEON_DATABASE_URL    — رابط قاعدة البيانات
- *   TELEGRAM_BOT_TOKEN   — توكن البوت
- *   TELEGRAM_CHANNEL_ID  — معرّف القناة
  *
  * الاستخدام:
  *   node scripts/chapter-importer.mjs \
  *     --manga="سولو ليفلنغ" \
- *     --base-url="https://site.com/manga/solo-leveling" \
+ *     --base-url="https://despair-manga.net/one-piece-chapter-{chapter}/" \
  *     --start=1 --end=10
  *
  *   --manga-id=5         (بديل للاسم — إذا عرفت الرقم)
  *   --no-publish         (استورد بدون نشر)
  *   --dry-run            (معاينة فقط بدون تغييرات)
+ *
+ * صيغ BASE_URL المدعومة:
+ *   {chapter}  — placeholder يُستبدل برقم الفصل:
+ *                https://site.com/manga/solo-leveling-chapter-{chapter}/
+ *   بدون placeholder — يُضاف رقم الفصل في النهاية:
+ *                https://site.com/manga/solo-leveling  →  .../solo-leveling/5
  */
 
 import pg from "pg";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import path from "path";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BATCH_SIZE  = 3;     // صفحات متزامنة في Telegram
-const BATCH_DELAY = 2000;  // ms بين دفعات Telegram
 const RETRY_COUNT = 3;
 const RETRY_DELAY = 3000;
 
@@ -53,7 +54,7 @@ const MANGA_ID     = process.env.IMPORTER_MANGA_ID
 const BASE_URL     = process.env.IMPORTER_BASE_URL    || getArg("base-url") || null;
 const START        = parseInt(process.env.IMPORTER_START   || getArg("start") || "1");
 const END          = parseInt(process.env.IMPORTER_END     || getArg("end")   || "1");
-const DELAY_SEC    = parseInt(process.env.IMPORTER_DELAY   || getArg("delay") || "10");
+const DELAY_SEC    = parseInt(process.env.IMPORTER_DELAY   || getArg("delay") || "5");
 const AUTO_PUBLISH = process.env.IMPORTER_PUBLISH !== undefined
                        ? process.env.IMPORTER_PUBLISH !== "false"
                        : !args.includes("--no-publish");
@@ -63,14 +64,10 @@ const DRY_RUN      = process.env.IMPORTER_DRY_RUN === "true" || args.includes("-
 // VALIDATION
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DB_URL   = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
-const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN?.trim();
-const TG_CHAN  = process.env.TELEGRAM_CHANNEL_ID?.trim();
+const DB_URL = process.env.NEON_DATABASE_URL || process.env.DATABASE_URL;
 
-if (!DB_URL)            { console.error("❌  NEON_DATABASE_URL غير موجود"); process.exit(1); }
-if (!TG_TOKEN)          { console.error("❌  TELEGRAM_BOT_TOKEN غير موجود"); process.exit(1); }
-if (!TG_CHAN)           { console.error("❌  TELEGRAM_CHANNEL_ID غير موجود"); process.exit(1); }
-if (!BASE_URL)          { console.error("❌  --base-url مطلوب"); process.exit(1); }
+if (!DB_URL)   { console.error("❌  NEON_DATABASE_URL غير موجود"); process.exit(1); }
+if (!BASE_URL) { console.error("❌  --base-url مطلوب"); process.exit(1); }
 if (!MANGA_NAME && !MANGA_ID) { console.error("❌  يجب تحديد --manga=\"الاسم\" أو --manga-id=5"); process.exit(1); }
 if (isNaN(START) || isNaN(END) || START > END) {
   console.error("❌  --start و --end يجب أن يكونا أرقاماً صحيحة (start ≤ end)");
@@ -108,18 +105,18 @@ async function chapterExists(mangaId, number) {
   return rows[0] ?? null;
 }
 
-/** إنشاء فصل جديد */
-async function createChapter(mangaId, number, title, status) {
+/** إنشاء فصل جديد — title يُترك null لأن الفرونت يعرض "الفصل N" تلقائياً */
+async function createChapter(mangaId, number, status) {
   const { rows } = await pool.query(
     `INSERT INTO chapters (manga_id, number, title, status, published_at)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id`,
-    [mangaId, number, title, status, status === "published" ? new Date() : null]
+    [mangaId, number, null, status, status === "published" ? new Date() : null]
   );
   return rows[0].id;
 }
 
-/** إدراج صفحة */
+/** إدراج صفحة بالرابط المباشر */
 async function insertPage(chapterId, pageNumber, imageUrl) {
   await pool.query(
     `INSERT INTO pages (chapter_id, page_number, image_url)
@@ -129,23 +126,26 @@ async function insertPage(chapterId, pageNumber, imageUrl) {
   );
 }
 
-/** تحديث رابط الصورة بعد رفعها لـ Telegram */
-async function updatePageUrl(chapterId, pageNumber, telegramUrl) {
-  await pool.query(
-    `UPDATE pages SET image_url = $1 WHERE chapter_id = $2 AND page_number = $3`,
-    [telegramUrl, chapterId, pageNumber]
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SCRAPING
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** بناء رابط الفصل من BASE_URL ورقم الفصل */
+/**
+ * بناء رابط الفصل من BASE_URL ورقم الفصل.
+ *
+ * يدعم صيغتين:
+ *   1. {chapter} placeholder:  https://site.com/manga/solo-chapter-{chapter}/
+ *      → يُستبدل {chapter} برقم الفصل مباشرة
+ *
+ *   2. بدون placeholder: يضيف رقم الفصل في نهاية الرابط
+ *      https://site.com/manga/solo  →  https://site.com/manga/solo/5
+ */
 function buildChapterUrl(base, num) {
-  // يدعم: base/1  أو  base/chapter-1  أو  base?ch=1
-  const clean = base.replace(/\/+$/, "");
-  return `${clean}/${num}`;
+  if (base.includes("{chapter}")) {
+    return base.replace(/\{chapter\}/g, String(num));
+  }
+  // fallback: أضف الرقم في النهاية
+  return `${base.replace(/\/+$/, "")}/${num}`;
 }
 
 /** محاولة جلب صفحة ويب مع headers المتصفح */
@@ -195,7 +195,7 @@ function extractImages(html, chapterUrl) {
   function resolveUrl(raw) {
     if (!raw || raw.includes("data:image") || raw.trim() === "") return null;
     let url = raw.trim();
-    if (url.startsWith("//"))    url = "https:" + url;
+    if (url.startsWith("//"))     url = "https:" + url;
     else if (url.startsWith("/")) url = origin + url;
     return url.startsWith("http") ? url : null;
   }
@@ -211,29 +211,24 @@ function extractImages(html, chapterUrl) {
 
   // أنماط CSS للحاويات — بالترتيب من الأكثر شيوعاً
   const selectors = [
-    // أنماط الـ manga reader themes
     ".reading-content img",
     ".chapter-content img",
     "#chapter-reader img",
     ".page-chapter img",
     ".chapter-images img",
     ".chapter img",
-    // ts-reader / mangareader WordPress theme
     "#readerarea img",
     ".ts-reader img",
     ".reader-area img",
-    // lazy-load selectors
     "img[data-src]",
     "img[data-lazy-src]",
     "img[data-original]",
     "img[data-url]",
     "img[data-wp-src]",
     "img[data-cfsrc]",
-    // حاويات عامة
     ".pages-container img",
     "#pages img",
     ".page-break img",
-    ".wp-manga-chapter-img",
     "img.wp-manga-chapter-img",
   ];
 
@@ -250,38 +245,29 @@ function extractImages(html, chapterUrl) {
     }
   }
 
-  // إزالة المكررات
   return [...new Set(images)];
 }
 
 /**
- * استخراج روابط الصور من مواقع تعتمد على ts_reader / mangareader
- * التي تحمّل الصور عبر JavaScript (الـ #readerarea فارغ في HTML الثابت).
- *
- * الطريقة: نستخرج مسار مجلد الفصل من og:image ثم نعدّد الصور
- * تسلسلياً حتى نصل لـ 404.
+ * Fallback لمواقع ts_reader / mangareader WordPress التي تحمّل الصور عبر JS.
+ * تستخرج مسار مجلد الفصل من og:image ثم تعدّد الصور تسلسلياً حتى 404.
  */
 async function extractImagesFromOgAndEnumerate(html, chapterUrl) {
   const $ = cheerio.load(html);
   const origin = new URL(chapterUrl).origin;
 
-  // استخراج رابط og:image
   const ogImage = $('meta[property="og:image"]').attr("content") || "";
   if (!ogImage) return [];
 
-  // بناء مسار المجلد من رابط الصورة الأولى
-  // مثال: https://site.com/wp-content/uploads/manga/chapter_abc/001.webp
-  //  → baseDir = https://site.com/wp-content/uploads/manga/chapter_abc/
   const lastSlash = ogImage.lastIndexOf("/");
   if (lastSlash === -1) return [];
-  const baseDir   = ogImage.slice(0, lastSlash + 1);
-  const firstName = ogImage.slice(lastSlash + 1); // مثال: 001.webp
+  const baseDir  = ogImage.slice(0, lastSlash + 1);
+  const firstName = ogImage.slice(lastSlash + 1);
   const extMatch  = firstName.match(/\.(webp|jpe?g|png|avif|gif)$/i);
   const ext       = extMatch ? extMatch[0] : ".webp";
 
   console.log(`  🔍  ts_reader mode — عدّد الصور من: ${baseDir}`);
 
-  // حدّد أعلى رقم ممكن للصور (حدّ واقي)
   const MAX_PAGES = 300;
   const images    = [];
 
@@ -294,7 +280,7 @@ async function extractImagesFromOgAndEnumerate(html, chapterUrl) {
         timeout: 10_000,
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          "Referer":    origin + "/",
+          "Referer": origin + "/",
         },
         validateStatus: s => s < 500,
         maxRedirects: 5,
@@ -303,8 +289,7 @@ async function extractImagesFromOgAndEnumerate(html, chapterUrl) {
       if (res.status === 200 || res.status === 301 || res.status === 302) {
         images.push(testUrl);
       } else {
-        // 404 → توقف — انتهت صفحات الفصل
-        break;
+        break; // 404 — انتهت صفحات الفصل
       }
     } catch {
       break;
@@ -312,67 +297,6 @@ async function extractImagesFromOgAndEnumerate(html, chapterUrl) {
   }
 
   return images;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TELEGRAM
-// ─────────────────────────────────────────────────────────────────────────────
-
-function mimeFromExt(filename) {
-  const ext = path.extname(filename).toLowerCase();
-  return { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-           ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif" }[ext] ?? "image/jpeg";
-}
-
-async function uploadToTelegram(buffer, filename) {
-  const blob = new Blob([buffer], { type: mimeFromExt(filename) });
-  const form = new FormData();
-  form.append("chat_id", TG_CHAN);
-  form.append("document", blob, filename);
-
-  const res = await axios.post(
-    `https://api.telegram.org/bot${TG_TOKEN}/sendDocument`,
-    form,
-    { timeout: 120_000 }
-  );
-
-  const fileId = res.data?.result?.document?.file_id;
-  if (!fileId) throw new Error(`Telegram لم يُرجع file_id: ${JSON.stringify(res.data).slice(0, 200)}`);
-  return `/api/img/${fileId}`;
-}
-
-async function downloadAndUpload(imageUrl, filename) {
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  let origin = "";
-  try { origin = new URL(imageUrl).origin; } catch {}
-
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-    "Referer": origin + "/",
-    "Origin": origin,
-    "sec-fetch-dest": "image",
-    "sec-fetch-mode": "no-cors",
-    "sec-fetch-site": "cross-site",
-  };
-
-  let lastErr = new Error("لم تبدأ أي محاولة");
-  for (let attempt = 0; attempt < RETRY_COUNT; attempt++) {
-    if (attempt > 0) await sleep(RETRY_DELAY * attempt);
-    try {
-      const imgRes = await axios.get(imageUrl, {
-        responseType: "arraybuffer",
-        timeout: 60_000,
-        headers,
-        maxRedirects: 10,
-        validateStatus: s => s < 400,
-      });
-      const buffer = Buffer.from(imgRes.data);
-      if (buffer.length < 1024) { lastErr = new Error(`صورة صغيرة جداً (${buffer.length}B)`); continue; }
-      return await uploadToTelegram(buffer, filename);
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -407,7 +331,6 @@ async function importChapter(manga, chapterNum) {
   let imageUrls = extractImages(html, chapterUrl);
 
   // إذا لم نجد صوراً، ربما الموقع يحمّلها عبر JavaScript (ts_reader / mangareader)
-  // نجرب استخراجها من og:image ثم تعداد الصور تسلسلياً
   if (imageUrls.length === 0) {
     console.log(`  ⚠️   لم تُوجد صور بالـ selectors العادية — جاري تجربة وضع ts_reader…`);
     imageUrls = await extractImagesFromOgAndEnumerate(html, chapterUrl);
@@ -420,44 +343,31 @@ async function importChapter(manga, chapterNum) {
   console.log(`  🖼️   عدد الصفحات: ${imageUrls.length}`);
 
   if (DRY_RUN) {
-    imageUrls.forEach((u, i) => console.log(`     [dry] ص${i+1}: ${u.slice(0, 80)}`));
+    imageUrls.forEach((u, i) => console.log(`     [dry] ص${i + 1}: ${u.slice(0, 100)}`));
     return { dryRun: true };
   }
 
   // إنشاء الفصل في DB
   const chapterStatus = AUTO_PUBLISH ? "published" : "pending";
-  const chapterId = await createChapter(manga.id, chapterNum, `فصل ${chapterNum}`, chapterStatus);
+  const chapterId = await createChapter(manga.id, chapterNum, chapterStatus);
   console.log(`  ✅  أُنشئ الفصل في DB (id=${chapterId}، الحالة: ${chapterStatus})`);
 
-  // رفع الصور لـ Telegram ثم حفظ الروابط
+  // حفظ روابط الصور المباشرة في DB — بدون رفع لتليجرام
   let pageSuccess = 0;
   let pageFailed  = 0;
 
-  for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
-    const batch = imageUrls.slice(i, i + BATCH_SIZE);
-
-    await Promise.all(batch.map(async (imgUrl, bi) => {
-      const pageNum  = i + bi + 1;
-      const ext      = (imgUrl.match(/\.(jpe?g|png|webp|gif|avif|bmp)/i) || [])[0] ?? ".jpg";
-      const filename = `ch${chapterId}-p${pageNum}${ext}`;
-
-      try {
-        const telegramUrl = await downloadAndUpload(imgUrl, filename);
-        await insertPage(chapterId, pageNum, telegramUrl);
-        console.log(`     ص${pageNum} ✅`);
-        pageSuccess++;
-      } catch (e) {
-        // احفظ الرابط الأصلي — سيُرفع لاحقاً بـ telegram-uploader
-        await insertPage(chapterId, pageNum, imgUrl);
-        console.warn(`     ص${pageNum} ⚠️  سيُعاد الرفع لاحقاً: ${e.message.slice(0, 60)}`);
-        pageFailed++;
-      }
-    }));
-
-    if (i + BATCH_SIZE < imageUrls.length) await sleep(BATCH_DELAY);
+  for (let i = 0; i < imageUrls.length; i++) {
+    const pageNum = i + 1;
+    try {
+      await insertPage(chapterId, pageNum, imageUrls[i]);
+      pageSuccess++;
+    } catch (e) {
+      console.error(`     ص${pageNum} ❌  ${e.message.slice(0, 80)}`);
+      pageFailed++;
+    }
   }
 
-  console.log(`  📊  ${pageSuccess} نجح / ${pageFailed} مؤجّل`);
+  console.log(`  📊  ${pageSuccess} صفحة محفوظة / ${pageFailed} فشلت`);
   return { chapterId, pageSuccess, pageFailed };
 }
 
@@ -494,6 +404,7 @@ async function main() {
   console.log(`📡  من فصل ${START} إلى فصل ${END}`);
   console.log(`⏱️   تأخير بين الفصول: ${DELAY_SEC}s`);
   console.log(`🚀  النشر التلقائي: ${AUTO_PUBLISH ? "مفعّل" : "معطّل"}`);
+  console.log(`🔗  نمط الرابط: ${BASE_URL}`);
   console.log();
 
   // ── استيراد الفصول ────────────────────────────────────────────────────────
@@ -502,10 +413,9 @@ async function main() {
   for (let num = START; num <= END; num++) {
     const result = await importChapter(manga, num);
 
-    if (result.skipped)       stats.skipped++;
-    else if (result.failed)   stats.failed++;
-    else if (result.dryRun)   stats.imported++;
-    else                      stats.imported++;
+    if (result.skipped)     stats.skipped++;
+    else if (result.failed) stats.failed++;
+    else                    stats.imported++;
 
     if (num < END) await sleep(DELAY_SEC * 1000);
   }

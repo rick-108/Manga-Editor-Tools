@@ -23,7 +23,10 @@ on:
         default: ""
 
       base_url:
-        description: "رابط قاعدة الفصول — مثال: https://site.com/manga/solo-leveling"
+        description: |
+          نمط رابط الفصول — استخدم {chapter} مكان رقم الفصل
+          مثال: https://despair-manga.net/one-piece-chapter-{chapter}/
+          أو بدون placeholder: https://site.com/manga/solo-leveling
         required: false
         default: ""
 
@@ -38,9 +41,9 @@ on:
         default: "10"
 
       delay_seconds:
-        description: "ثواني الانتظار بين الفصول (افتراضي: 10)"
+        description: "ثواني الانتظار بين الفصول (افتراضي: 5)"
         required: false
-        default: "10"
+        default: "5"
 
       auto_publish:
         description: "نشر الفصول تلقائياً بعد الاستيراد؟"
@@ -77,16 +80,15 @@ jobs:
           version: 10
 
       # ── 3. تثبيت المكتبات ────────────────────────────────────────────────────
-      #   نستخدم --no-frozen-lockfile لتفادي أي تعارض في CI بعد إضافة مكتبات
       - name: تثبيت المكتبات (workspace)
         run: pnpm install --no-frozen-lockfile
 
       # ── 4. تحقق سريع أن المكتبات المطلوبة موجودة ──────────────────────────
       - name: التحقق من المكتبات
         run: |
-          node -e "require('pg');    console.log('✅ pg')"       || (echo '❌ pg مفقود'      && exit 1)
-          node -e "require('axios'); console.log('✅ axios')"    || (echo '❌ axios مفقود'   && exit 1)
-          node -e "require('cheerio'); console.log('✅ cheerio')" || (echo '❌ cheerio مفقود' && exit 1)
+          node -e "require('pg');      console.log('✅ pg')"       || (echo '❌ pg مفقود'      && exit 1)
+          node -e "require('axios');   console.log('✅ axios')"    || (echo '❌ axios مفقود'   && exit 1)
+          node -e "require('cheerio'); console.log('✅ cheerio')"  || (echo '❌ cheerio مفقود' && exit 1)
         working-directory: scripts
 
       # ── 5a. استيراد فصول جديدة (تشغيل يدوي) ────────────────────────────────
@@ -94,8 +96,6 @@ jobs:
         if: github.event.inputs.job == 'import-chapters'
         env:
           NEON_DATABASE_URL:    ${{ secrets.NEON_DATABASE_URL }}
-          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID:  ${{ secrets.TELEGRAM_CHANNEL_ID }}
           # نمرّر القيم كـ env vars لتجنب مشكلة المسافات والأحرف العربية في shell
           IMPORTER_MANGA_NAME:  ${{ github.event.inputs.manga_name }}
           IMPORTER_BASE_URL:    ${{ github.event.inputs.base_url }}
